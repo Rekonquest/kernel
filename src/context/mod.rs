@@ -48,6 +48,9 @@ mod arch;
 /// Context struct
 pub mod context;
 
+/// Pure EEVDF scheduling policy (the orchestrator half of the scheduler).
+pub mod eevdf;
+
 /// Context switch function
 pub mod switch;
 

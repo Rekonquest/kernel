@@ -4,8 +4,10 @@
 
 use crate::{
     context::{
-        self, arch, idle_contexts, idle_contexts_try, memory::AddrSpaceSwitchReadGuard,
-        run_contexts, ArcContextLockWriteGuard, Context, ContextLock, WeakContextRef,
+        self, arch,
+        eevdf::{self, Entity},
+        idle_contexts, idle_contexts_try, memory::AddrSpaceSwitchReadGuard, run_contexts,
+        ArcContextLockWriteGuard, Context, ContextLock, WeakContextRef,
     },
     cpu_set::LogicalCpuId,
     cpu_stats::{self, CpuState},
@@ -29,18 +31,6 @@ enum UpdateResult {
     Skip,
     Blocked,
 }
-
-// A simple geometric series where value[i] ~= value[i + 1] * 1.25
-const SCHED_PRIO_TO_WEIGHT: [usize; 40] = [
-    88761, 71755, 56483, 46273, 36291, 29154, 23254, 18705, 14949, 11916, 9548, 7620, 6100, 4904,
-    3906, 3121, 2501, 1991, 1586, 1277, 1024, 820, 655, 526, 423, 335, 272, 215, 172, 137, 110, 87,
-    70, 56, 45, 36, 29, 23, 18, 15,
-];
-
-const SCALE: u128 = 1 << 40;
-const TICK_INTERVAL: u64 = 3; // Approx 6.75 ms
-const BASE_SLICE_TICKS: u64 = TICK_INTERVAL * 3; // Approx 20.25 ms
-const NANOS_PER_TICK: u128 = 2_250_000; // 2.25 ms
 
 /// Determines if a given context is eligible to be scheduled on a given CPU (in
 /// principle, the current CPU).
@@ -105,7 +95,7 @@ pub fn tick(token: &mut CleanLockToken) {
     ticks_cell.set(new_ticks);
 
     // Trigger a context switch after every 3 ticks (approx. 6.75 ms).
-    if new_ticks >= TICK_INTERVAL as usize
+    if new_ticks >= eevdf::TICK_INTERVAL as usize
         && arch::CONTEXT_SWITCH_LOCK.load(Ordering::Relaxed) == false
     {
         switch(token);
@@ -203,19 +193,26 @@ pub fn switch(token: &mut CleanLockToken) -> SwitchResult {
                 continue;
             };
 
-            let new_vtime = guard.vtime.max(run_contexts.v);
-            guard.vtime = new_vtime;
+            let weight = eevdf::weight_of(guard.prio);
 
-            let weight = SCHED_PRIO_TO_WEIGHT[guard.prio] as u64;
-            let scaled_slice = (BASE_SLICE_TICKS as u128 * SCALE) / weight as u128;
+            // Policy: bring the woken context back in (clamp vtime to V, fresh slice/deadline).
+            let mut e = Entity {
+                vtime: guard.vtime,
+                vd: guard.vd,
+                rem_slice: guard.rem_slice,
+            };
+            eevdf::activate(&mut e, weight, run_contexts.v);
+            guard.vtime = e.vtime;
+            guard.vd = e.vd;
+            guard.rem_slice = e.rem_slice;
 
+            // Mechanism: account the now-active weight and enqueue.
             if !guard.is_active {
                 guard.is_active = true;
                 run_contexts.total_weight += weight;
             }
 
-            guard.vd = new_vtime + scaled_slice as u64;
-            guard.rem_slice = BASE_SLICE_TICKS * SCALE as u64;
+            let new_vtime = guard.vtime;
             let key = (guard.vd, Reverse(guard.rem_slice), guard.debug_id);
             guard.queue_key = Some(key);
             drop(guard);
@@ -449,38 +446,32 @@ fn select_next_context(
     let is_idle = Arc::ptr_eq(&prev_context_lock, &idle_context);
     let prev_runnable = !is_idle && prev_context_guard.status.is_runnable();
 
-    let elapsed_ticks = elapsed_time as u128 * SCALE / NANOS_PER_TICK;
+    let elapsed_ticks = eevdf::elapsed_ticks(elapsed_time);
 
     if prev_runnable {
-        let weight = SCHED_PRIO_TO_WEIGHT[prev_context_guard.prio] as u64;
-        prev_context_guard.rem_slice = prev_context_guard
-            .rem_slice
-            .saturating_sub((elapsed_ticks) as u64);
-        let scaled_task = elapsed_ticks / weight as u128;
-        prev_context_guard.vtime += scaled_task as u64;
+        let weight = eevdf::weight_of(prev_context_guard.prio);
 
-        if prev_context_guard.vtime < contexts_data.v {
-            prev_context_guard.vtime = contexts_data.v;
-        }
-
-        let is_yield = (elapsed_time as u128) < (TICK_INTERVAL as u128 * NANOS_PER_TICK) / 2;
-
-        if is_yield {
-            let unconsumed = prev_context_guard.rem_slice as u128;
-            let penalty = unconsumed / weight as u128;
-            prev_context_guard.vtime += penalty as u64;
-            prev_context_guard.rem_slice = 0;
-        }
-
-        if prev_context_guard.rem_slice == 0 {
-            prev_context_guard.rem_slice = BASE_SLICE_TICKS * SCALE as u64;
-            let scaled_slice = (BASE_SLICE_TICKS as u128 * SCALE) / weight as u128;
-            prev_context_guard.vd = prev_context_guard.vtime + scaled_slice as u64;
-        }
+        // Policy: charge prev for the slice it just ran (vtime / slice / deadline update).
+        let mut e = Entity {
+            vtime: prev_context_guard.vtime,
+            vd: prev_context_guard.vd,
+            rem_slice: prev_context_guard.rem_slice,
+        };
+        eevdf::charge(
+            &mut e,
+            weight,
+            elapsed_ticks,
+            eevdf::is_yield(elapsed_time),
+            contexts_data.v,
+        );
+        prev_context_guard.vtime = e.vtime;
+        prev_context_guard.vd = e.vd;
+        prev_context_guard.rem_slice = e.rem_slice;
     } else if !is_idle {
+        // Mechanism: prev is no longer runnable; drop its weight from the active set.
         if prev_context_guard.is_active {
             prev_context_guard.is_active = false;
-            let weight = SCHED_PRIO_TO_WEIGHT[prev_context_guard.prio] as u64;
+            let weight = eevdf::weight_of(prev_context_guard.prio);
             contexts_data.total_weight = contexts_data.total_weight.saturating_sub(weight);
         }
         prev_context_guard.rem_slice = 0;
@@ -494,7 +485,7 @@ fn select_next_context(
     let mut ineligible_vd = u64::MAX;
 
     if prev_runnable {
-        if prev_context_guard.vtime <= contexts_data.v {
+        if eevdf::eligible(prev_context_guard.vtime, contexts_data.v) {
             prev_is_eligible = true;
         } else {
             ineligible_min_vtime = prev_context_guard.vtime;
@@ -561,7 +552,7 @@ fn select_next_context(
             }
         }
 
-        if *vtime <= contexts_data.v {
+        if eevdf::eligible(*vtime, contexts_data.v) {
             // Eligible
             eligible_best = Some((guard, best_addr_space));
             break;
@@ -604,10 +595,18 @@ fn select_next_context(
         }
     } else if prev_is_eligible && eligible_best.is_some() {
         if let Some((ref guard, _)) = eligible_best {
-            if prev_context_guard.vd < guard.vd
-                || (prev_context_guard.vd == guard.vd
-                    && prev_context_guard.rem_slice > guard.rem_slice)
-            {
+            // Policy: keep prev only if it is strictly preferred over the candidate.
+            let prev = Entity {
+                vtime: prev_context_guard.vtime,
+                vd: prev_context_guard.vd,
+                rem_slice: prev_context_guard.rem_slice,
+            };
+            let cand = Entity {
+                vtime: guard.vtime,
+                vd: guard.vd,
+                rem_slice: guard.rem_slice,
+            };
+            if eevdf::prefer(&prev, &cand) == core::cmp::Ordering::Less {
                 eligible_best = None;
             }
         }
@@ -623,10 +622,8 @@ fn select_next_context(
     }
 
     if final_winner.is_some() || prev_runnable {
-        if contexts_data.total_weight > 0 {
-            let v_advance = elapsed_ticks as u128 / contexts_data.total_weight as u128;
-            contexts_data.v += v_advance as u64;
-        }
+        // Policy: advance global virtual time by the slice, normalised by active weight.
+        contexts_data.v += eevdf::v_advance(elapsed_ticks, contexts_data.total_weight);
 
         if let Some((chosen_guard, addr_space)) = final_winner {
             if prev_runnable {
@@ -638,7 +635,7 @@ fn select_next_context(
                 );
                 prev_context_guard.queue_key = Some((vd, Reverse(rem_slice), ctxt_id));
 
-                let weight = SCHED_PRIO_TO_WEIGHT[prev_context_guard.prio] as u64;
+                let weight = eevdf::weight_of(prev_context_guard.prio);
                 contexts_data.queue.insert(
                     (vd, Reverse(rem_slice), ctxt_id),
                     (
