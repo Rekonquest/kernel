@@ -21,8 +21,10 @@
 //! [`Ring`]: crate::ring::Ring
 //! [`Reactor`]: crate::reactor::Reactor
 
-use core::ptr;
-use core::sync::atomic::{fence, Ordering};
+use core::{
+    ptr,
+    sync::atomic::{fence, Ordering},
+};
 
 use crate::dma::{Descriptor, DmaRegion};
 
@@ -270,11 +272,15 @@ impl<const Q: usize> VirtQueue<Q> {
     }
 
     unsafe fn read_desc_flags(&self, i: u16) -> u16 {
-        u16::from_le(unsafe { ptr::read_volatile(self.desc.add(i as usize * 16 + 12) as *const u16) })
+        u16::from_le(unsafe {
+            ptr::read_volatile(self.desc.add(i as usize * 16 + 12) as *const u16)
+        })
     }
 
     unsafe fn read_desc_next(&self, i: u16) -> u16 {
-        u16::from_le(unsafe { ptr::read_volatile(self.desc.add(i as usize * 16 + 14) as *const u16) })
+        u16::from_le(unsafe {
+            ptr::read_volatile(self.desc.add(i as usize * 16 + 14) as *const u16)
+        })
     }
 
     unsafe fn write_avail_ring(&self, slot: u16, head: u16) {

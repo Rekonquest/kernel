@@ -18,4 +18,4 @@ pub mod states;
 pub use budget::PowerBudget;
 pub use governor::Governor;
 pub use sensors::{SensorEvent, Sensors};
-pub use states::{DeviceState, PowerManager, SystemState};
+pub use states::{DeviceState, PowerManager, SuspendVetoed, SystemState};

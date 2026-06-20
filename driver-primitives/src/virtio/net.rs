@@ -17,8 +17,10 @@
 
 use core::ptr;
 
-use crate::dma::DmaRegion;
-use crate::feature::{self, Features};
+use crate::{
+    dma::DmaRegion,
+    feature::{self, Features},
+};
 
 use super::queue::{QueueError, Segment, Used, VirtQueue};
 
@@ -106,11 +108,7 @@ impl<const RXQ: usize, const TXQ: usize> VirtioNet<RXQ, TXQ> {
 
     /// Transmit a frame: write the net header into `hdr` and enqueue the
     /// readable chain `[header, frame]` on the TX queue. Returns the chain head.
-    pub fn transmit<H: DmaRegion>(
-        &mut self,
-        hdr: &H,
-        frame: Segment,
-    ) -> Result<u16, QueueError> {
+    pub fn transmit<H: DmaRegion>(&mut self, hdr: &H, frame: Segment) -> Result<u16, QueueError> {
         if hdr.len() < VirtioNetHdr::LEN {
             return Err(QueueError::RegionTooSmall);
         }

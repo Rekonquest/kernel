@@ -11,8 +11,10 @@ use core::ptr;
 
 use crate::dma::DmaRegion;
 
-use super::net::RxPool;
-use super::queue::{QueueError, VirtQueue};
+use super::{
+    net::RxPool,
+    queue::{QueueError, VirtQueue},
+};
 
 /// Event types (`virtio_input_event.type`, matching Linux `EV_*`).
 pub mod ev {

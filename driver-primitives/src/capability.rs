@@ -29,8 +29,10 @@
 //! [`send`]: CapabilityRing::send
 //! [`install`]: Grant::install
 
-use crate::fence::SeqCounter;
-use crate::ring::{Full, Ring};
+use crate::{
+    fence::SeqCounter,
+    ring::{Full, Ring},
+};
 
 /// A capability in flight: the transferred resource plus a monotonic grant id
 /// for provenance. Constructed only by [`CapabilityRing::send`] and consumed

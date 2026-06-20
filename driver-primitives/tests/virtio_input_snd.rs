@@ -1,11 +1,17 @@
 //! Input (virtio-input) and audio (virtio-snd) end to end against mock devices.
 
-use core::ptr;
-use core::sync::atomic::{fence, Ordering};
+use core::{
+    ptr,
+    sync::atomic::{fence, Ordering},
+};
 
-use driver_primitives::dma::DmaRegion;
-use driver_primitives::virtio::input::{self, ev};
-use driver_primitives::virtio::{snd, VirtioInput, VirtioSnd, VirtQueue};
+use driver_primitives::{
+    dma::DmaRegion,
+    virtio::{
+        input::{self, ev},
+        snd, VirtQueue, VirtioInput, VirtioSnd,
+    },
+};
 
 const Q: usize = 64;
 
@@ -16,7 +22,10 @@ struct Dma {
 impl Dma {
     fn new(bytes: usize) -> Self {
         let units = bytes.div_ceil(16).max(1);
-        Dma { mem: vec![0u128; units], len: units * 16 }
+        Dma {
+            mem: vec![0u128; units],
+            len: units * 16,
+        }
     }
 }
 impl DmaRegion for Dma {
@@ -57,7 +66,8 @@ impl Mock {
         }
         fence(Ordering::Acquire);
         let slot = (self.last_avail % Q as u16) as usize;
-        let head = u16::from_le(unsafe { ptr::read_volatile(avail.add(4 + slot * 2) as *const u16) });
+        let head =
+            u16::from_le(unsafe { ptr::read_volatile(avail.add(4 + slot * 2) as *const u16) });
         self.last_avail = self.last_avail.wrapping_add(1);
         Some(head)
     }
@@ -132,12 +142,24 @@ fn audio_set_params_start_and_play() {
     let resp = Dma::new(8);
 
     // set_params: confirm the device sees the right command code, ack OK.
-    dev.set_params(&cmd, &resp, 0, 8192, 2048, 2, snd::format::S16, snd::rate::R48000)
-        .unwrap();
+    dev.set_params(
+        &cmd,
+        &resp,
+        0,
+        8192,
+        2048,
+        2,
+        snd::format::S16,
+        snd::rate::R48000,
+    )
+    .unwrap();
     unsafe {
         let head = cmock.next_head().unwrap();
         let (addr, _l, _f, _n) = cmock.desc(head);
-        assert_eq!(u32::from_le(ptr::read_volatile(addr as *const u32)), snd::code::PCM_SET_PARAMS);
+        assert_eq!(
+            u32::from_le(ptr::read_volatile(addr as *const u32)),
+            snd::code::PCM_SET_PARAMS
+        );
         // Write an OK response into the writable descriptor (the next one).
         let (_a, _l2, _f2, next) = cmock.desc(head);
         let (resp_addr, _rl, _rf, _rn) = cmock.desc(next);
@@ -145,14 +167,20 @@ fn audio_set_params_start_and_play() {
         cmock.complete(head, 4);
     }
     assert!(dev.poll_control().is_some());
-    assert_eq!(snd::VirtioSnd::<Q, Q>::response_status(&resp), snd::resp::OK);
+    assert_eq!(
+        snd::VirtioSnd::<Q, Q>::response_status(&resp),
+        snd::resp::OK
+    );
 
     // start.
     dev.start(&cmd, &resp, 0).unwrap();
     unsafe {
         let head = cmock.next_head().unwrap();
         let (addr, _l, _f, next) = cmock.desc(head);
-        assert_eq!(u32::from_le(ptr::read_volatile(addr as *const u32)), snd::code::PCM_START);
+        assert_eq!(
+            u32::from_le(ptr::read_volatile(addr as *const u32)),
+            snd::code::PCM_START
+        );
         let (resp_addr, _rl, _rf, _rn) = cmock.desc(next);
         ptr::write_volatile(resp_addr as *mut u32, snd::resp::OK.to_le());
         cmock.complete(head, 4);

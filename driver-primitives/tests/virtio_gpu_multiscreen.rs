@@ -12,14 +12,20 @@
 //! serialization + the Display orchestrator). Only the device is mocked: it
 //! parses the control queue and answers like QEMU's virtio-gpu would.
 
-use core::ptr;
-use core::sync::atomic::{fence, Ordering};
+use core::{
+    ptr,
+    sync::atomic::{fence, Ordering},
+};
 
-use driver_primitives::display::{Change, Display, Mode};
-use driver_primitives::dma::DmaRegion;
-use driver_primitives::txn::Transaction;
-use driver_primitives::virtio::gpu::{self, ty, Rect};
-use driver_primitives::virtio::{VirtQueue, VirtioGpu};
+use driver_primitives::{
+    display::{Change, Display, Mode},
+    dma::DmaRegion,
+    txn::Transaction,
+    virtio::{
+        gpu::{self, ty, Rect},
+        VirtQueue, VirtioGpu,
+    },
+};
 
 const Q: usize = 64;
 
@@ -30,7 +36,10 @@ struct Dma {
 impl Dma {
     fn new(bytes: usize) -> Self {
         let units = bytes.div_ceil(16).max(1);
-        Dma { mem: vec![0u128; units], len: units * 16 }
+        Dma {
+            mem: vec![0u128; units],
+            len: units * 16,
+        }
     }
 }
 impl DmaRegion for Dma {
@@ -65,7 +74,8 @@ impl MockGpu {
         }
         fence(Ordering::Acquire);
         let slot = (self.last_avail % Q as u16) as usize;
-        let head = u16::from_le(unsafe { ptr::read_volatile(avail.add(4 + slot * 2) as *const u16) });
+        let head =
+            u16::from_le(unsafe { ptr::read_volatile(avail.add(4 + slot * 2) as *const u16) });
         self.last_avail = self.last_avail.wrapping_add(1);
 
         // Descriptor chain: head = command (readable), next = response (writable).
@@ -156,12 +166,25 @@ fn discover_monitors_configure_atomically_and_present() {
             let mode = Mode::new(s.rect.width, s.rect.height, 60000);
             display.connect(i, mode);
             txn.stage(Change::SetMode { output: i, mode }).unwrap();
-            txn.stage(Change::SetFb { output: i, fb: 100 + i as u32 }).unwrap();
+            txn.stage(Change::SetFb {
+                output: i,
+                fb: 100 + i as u32,
+            })
+            .unwrap();
         }
     }
-    assert!(display.commit(txn).is_ok(), "all monitors configured atomically");
-    assert_eq!(display.output(0).unwrap().mode(), Some(Mode::new(1920, 1080, 60000)));
-    assert_eq!(display.output(1).unwrap().mode(), Some(Mode::new(1280, 720, 60000)));
+    assert!(
+        display.commit(txn).is_ok(),
+        "all monitors configured atomically"
+    );
+    assert_eq!(
+        display.output(0).unwrap().mode(),
+        Some(Mode::new(1920, 1080, 60000))
+    );
+    assert_eq!(
+        display.output(1).unwrap().mode(),
+        Some(Mode::new(1280, 720, 60000))
+    );
 
     // 3. Present a frame on scanout 0: create resource, attach backing, bind to
     //    the scanout, transfer pixels, flush.
@@ -175,12 +198,14 @@ fn discover_monitors_configure_atomically_and_present() {
         ("flush", ty::RESOURCE_FLUSH),
     ];
 
-    gpu.create_resource_2d(&cmd, &resp, 1, gpu::format::B8G8R8A8_UNORM, 1920, 1080).unwrap();
+    gpu.create_resource_2d(&cmd, &resp, 1, gpu::format::B8G8R8A8_UNORM, 1920, 1080)
+        .unwrap();
     assert!(unsafe { dev.service_one() });
     assert_eq!(dev.last_cmd_type, steps[0].1);
     assert!(gpu.poll().is_some());
 
-    gpu.attach_backing(&cmd, &resp, 1, fb.phys_addr(), fb.len() as u32).unwrap();
+    gpu.attach_backing(&cmd, &resp, 1, fb.phys_addr(), fb.len() as u32)
+        .unwrap();
     assert!(unsafe { dev.service_one() });
     assert_eq!(dev.last_cmd_type, steps[1].1);
     assert!(gpu.poll().is_some());

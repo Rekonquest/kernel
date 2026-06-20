@@ -30,6 +30,10 @@ pub enum SystemState {
     S5,
 }
 
+/// Returned when a device vetoes a suspend, leaving the system untouched.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SuspendVetoed;
+
 #[derive(Clone, Copy)]
 struct Device {
     active: bool,
@@ -82,10 +86,10 @@ impl<const N: usize> PowerManager<N> {
 
     /// Set whether device `id` currently blocks suspend (e.g. mid-transfer).
     pub fn set_blocks_suspend(&mut self, id: usize, blocks: bool) {
-        if let Some(d) = self.devices.get_mut(id) {
-            if d.active {
-                d.blocks_suspend = blocks;
-            }
+        if let Some(d) = self.devices.get_mut(id)
+            && d.active
+        {
+            d.blocks_suspend = blocks;
         }
     }
 
@@ -101,7 +105,7 @@ impl<const N: usize> PowerManager<N> {
 
     /// Suspend to `S3`: atomically move every device to `D3`. If any active
     /// device blocks suspend, the transition aborts and nothing changes.
-    pub fn suspend(&mut self) -> Result<(), ()> {
+    pub fn suspend(&mut self) -> Result<(), SuspendVetoed> {
         if self.system != SystemState::S0 {
             return Ok(());
         }
@@ -112,7 +116,7 @@ impl<const N: usize> PowerManager<N> {
             }
         }
         if !txn.validate(|&id| !self.devices[id].blocks_suspend) {
-            return Err(()); // a device vetoed — nothing applied
+            return Err(SuspendVetoed); // a device vetoed — nothing applied
         }
         txn.commit(|id| self.devices[id].state = DeviceState::D3);
         self.system = SystemState::S3;

@@ -10,9 +10,7 @@
 //! orchestrator, the platform is dumb mechanism behind a narrow contract, and
 //! the cost (a blocking IRQ wait, an explicit ack) is never hidden.
 
-use crate::dma::DmaRegion;
-use crate::mmio::Bank;
-use crate::virtio::VirtioMmio;
+use crate::{dma::DmaRegion, mmio::Bank, virtio::VirtioMmio};
 
 /// What a platform binding can fail with.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -5,9 +5,11 @@
 //! mock device for a real virtio transport (real `DmaRegion`, real doorbell
 //! register) is the only remaining step to drive metal.
 
-use driver_primitives::dma::{Descriptor, DmaRegion};
-use driver_primitives::mmio::Reg;
-use driver_primitives::Reactor;
+use driver_primitives::{
+    dma::{Descriptor, DmaRegion},
+    mmio::Reg,
+    Reactor,
+};
 
 /// A heap-backed stand-in for a DMA-capable frame buffer. On Redox this role is
 /// played by `redox_syscall::Dma`, whose physical address and CPU mapping
@@ -56,7 +58,11 @@ fn nic_tx_path_composes_from_the_kit() {
         ids.push(nic.submit(0, desc).unwrap());
         doorbell.modify(|kicks| kicks + 1);
     }
-    assert_eq!(doorbell.read(), 4, "driver rang the doorbell once per frame");
+    assert_eq!(
+        doorbell.read(),
+        4,
+        "driver rang the doorbell once per frame"
+    );
 
     // Device: drain the queue, "transmit" each descriptor, and report bytes sent.
     while let Some((ticket, desc)) = nic.dispatch() {
@@ -72,8 +78,15 @@ fn nic_tx_path_composes_from_the_kit() {
 
     assert_eq!(completions.len(), 4);
     for (i, frame) in frames.iter().enumerate() {
-        assert_eq!(completions[i].0, ids[i].0, "completion seq matches submission");
-        assert_eq!(completions[i].1 as usize, frame.len(), "bytes sent == frame length");
+        assert_eq!(
+            completions[i].0, ids[i].0,
+            "completion seq matches submission"
+        );
+        assert_eq!(
+            completions[i].1 as usize,
+            frame.len(),
+            "bytes sent == frame length"
+        );
     }
     assert!(nic.is_idle(), "no work left outstanding");
     assert_eq!(nic.lost_completions(), 0);

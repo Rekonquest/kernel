@@ -7,11 +7,15 @@
 //! used ring; the driver reaps. If this passes, the same `add_buf`/`poll_used`
 //! code drives a real virtio device once the addresses are programmed into it.
 
-use core::ptr;
-use core::sync::atomic::{fence, Ordering};
+use core::{
+    ptr,
+    sync::atomic::{fence, Ordering},
+};
 
-use driver_primitives::dma::DmaRegion;
-use driver_primitives::virtio::{Segment, VirtQueue};
+use driver_primitives::{
+    dma::DmaRegion,
+    virtio::{Segment, VirtQueue},
+};
 
 const Q: usize = 256;
 
@@ -68,7 +72,8 @@ impl MockDevice {
         fence(Ordering::Acquire);
 
         let slot = (self.last_avail % Q as u16) as usize;
-        let head = u16::from_le(unsafe { ptr::read_volatile(avail.add(4 + slot * 2) as *const u16) });
+        let head =
+            u16::from_le(unsafe { ptr::read_volatile(avail.add(4 + slot * 2) as *const u16) });
         self.last_avail = self.last_avail.wrapping_add(1);
 
         // Walk the descriptor chain, summing readable bytes to prove the device
@@ -146,7 +151,10 @@ fn driver_and_device_round_trip_a_buffer() {
 
     // Device services it and sums the bytes (1+2+3+4 = 10).
     let consumed = unsafe { dev.service_one() }.unwrap();
-    assert_eq!(consumed, 10, "device followed the descriptor and read the buffer");
+    assert_eq!(
+        consumed, 10,
+        "device followed the descriptor and read the buffer"
+    );
 
     // Driver reaps and the descriptor returns to the free list.
     let used = vq.poll_used().unwrap();
@@ -181,8 +189,16 @@ fn multi_descriptor_chain_is_built_and_freed() {
     let _ = (&mut hdr, &mut data);
 
     vq.add_buf(&[
-        Segment { addr: hdr.phys_addr(), len: 2, device_writable: false },
-        Segment { addr: data.phys_addr(), len: 3, device_writable: false },
+        Segment {
+            addr: hdr.phys_addr(),
+            len: 2,
+            device_writable: false,
+        },
+        Segment {
+            addr: data.phys_addr(),
+            len: 3,
+            device_writable: false,
+        },
     ])
     .unwrap();
     assert_eq!(vq.num_free(), Q as u16 - 2, "two descriptors taken");
@@ -220,5 +236,9 @@ fn many_buffers_keep_the_free_list_balanced() {
         assert!(unsafe { dev.service_one() }.is_some());
         assert!(vq.poll_used().is_some());
     }
-    assert_eq!(vq.num_free(), Q as u16, "no descriptors leaked over 1000 cycles");
+    assert_eq!(
+        vq.num_free(),
+        Q as u16,
+        "no descriptors leaked over 1000 cycles"
+    );
 }

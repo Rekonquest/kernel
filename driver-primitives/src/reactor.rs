@@ -24,10 +24,12 @@
 //! [`SeqCounter`]: crate::fence::SeqCounter
 //! [`Fence`]: crate::fence::Fence
 
-use crate::event::EventQueue;
-use crate::fairqueue::FairQueue;
-use crate::fence::{Fence, SeqCounter};
-use crate::handle::{Handle, HandleTable};
+use crate::{
+    event::EventQueue,
+    fairqueue::FairQueue,
+    fence::{Fence, SeqCounter},
+    handle::{Handle, HandleTable},
+};
 
 /// Identifier handed back from [`Reactor::submit`], correlating to the
 /// [`Completion::seq`] that will eventually appear.
@@ -134,12 +136,12 @@ impl<Op, Res, const N: usize, const C: usize> Reactor<Op, Res, N, C> {
         let slot = {
             let mut best: Option<(usize, u64)> = None;
             for (i, p) in self.pending.iter().enumerate() {
-                if let Some(pending) = p {
-                    if pending.client == client {
-                        match best {
-                            Some((_, best_seq)) if pending.seq >= best_seq => {}
-                            _ => best = Some((i, pending.seq)),
-                        }
+                if let Some(pending) = p
+                    && pending.client == client
+                {
+                    match best {
+                        Some((_, best_seq)) if pending.seq >= best_seq => {}
+                        _ => best = Some((i, pending.seq)),
                     }
                 }
             }
@@ -251,6 +253,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::needless_range_loop)] // `c` is both the index and the client id
     fn dispatch_order_is_fair_across_clients() {
         // Two clients, weights 1 and 3, both kept continuously backlogged. The
         // reactor should serve the weight-3 client ~3x as often — the scheduler

@@ -6,16 +6,18 @@
 //! any other host it compiles to a stub that reports [`PlatformError::Unsupported`],
 //! so the daemon logic still type-checks off-target.
 
-use driver_primitives::dma::DmaRegion;
-use driver_primitives::mmio::Bank;
-use driver_primitives::runtime::{Platform, PlatformError};
+use driver_primitives::{
+    dma::DmaRegion,
+    mmio::Bank,
+    runtime::{Platform, PlatformError},
+};
 
 #[cfg(target_os = "redox")]
 mod imp {
     use super::*;
     use syscall::{
         close,
-        flag::{O_CLOEXEC, O_RDWR, PhysmapFlags},
+        flag::{PhysmapFlags, O_CLOEXEC, O_RDWR},
         open, physalloc, physfree, physmap, physunmap, read, write,
     };
 
@@ -33,7 +35,11 @@ mod imp {
                 .map_err(|_| PlatformError::MapFailed)?;
             // SAFETY: physmap returned a mapping of `len` bytes.
             unsafe { core::ptr::write_bytes(virt as *mut u8, 0, len) };
-            Ok(Self { virt: virt as *mut u8, phys, len })
+            Ok(Self {
+                virt: virt as *mut u8,
+                phys,
+                len,
+            })
         }
     }
 

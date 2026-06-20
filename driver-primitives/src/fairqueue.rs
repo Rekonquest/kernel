@@ -91,10 +91,10 @@ impl<const N: usize> FairQueue<N> {
     ///
     /// [`pick`]: FairQueue::pick
     pub fn set_backlogged(&mut self, id: usize, backlogged: bool) {
-        if let Some(c) = self.clients.get_mut(id) {
-            if c.active {
-                c.backlogged = backlogged;
-            }
+        if let Some(c) = self.clients.get_mut(id)
+            && c.active
+        {
+            c.backlogged = backlogged;
         }
     }
 
@@ -118,11 +118,11 @@ impl<const N: usize> FairQueue<N> {
     /// time by `cost / weight`. Call after serving the client. Slower-advancing
     /// (higher-weight) clients are picked more often — that is the fairness.
     pub fn charge(&mut self, id: usize, cost: u64) {
-        if let Some(c) = self.clients.get_mut(id) {
-            if c.active {
-                let delta = (cost as u128 * SCALE / c.weight as u128) as u64;
-                c.vtime = c.vtime.saturating_add(delta);
-            }
+        if let Some(c) = self.clients.get_mut(id)
+            && c.active
+        {
+            let delta = (cost as u128 * SCALE / c.weight as u128) as u64;
+            c.vtime = c.vtime.saturating_add(delta);
         }
         // The floor tracks the least-serviced active client.
         self.min_vtime = self.min_active_vtime().unwrap_or(self.min_vtime);

@@ -2,11 +2,15 @@
 //! into one, reap it through the pool, and re-post it — the receive side of a
 //! real virtio-net driver, exercised on the host.
 
-use core::ptr;
-use core::sync::atomic::{fence, Ordering};
+use core::{
+    ptr,
+    sync::atomic::{fence, Ordering},
+};
 
-use driver_primitives::dma::DmaRegion;
-use driver_primitives::virtio::{RxPool, VirtQueue};
+use driver_primitives::{
+    dma::DmaRegion,
+    virtio::{RxPool, VirtQueue},
+};
 
 const Q: usize = 64;
 const POOL: usize = 8;
@@ -18,7 +22,10 @@ struct Dma {
 impl Dma {
     fn new(bytes: usize) -> Self {
         let units = bytes.div_ceil(16).max(1);
-        Dma { mem: vec![0u128; units], len: units * 16 }
+        Dma {
+            mem: vec![0u128; units],
+            len: units * 16,
+        }
     }
 }
 impl DmaRegion for Dma {
@@ -51,7 +58,8 @@ impl MockRx {
         }
         fence(Ordering::Acquire);
         let slot = (self.last_avail % Q as u16) as usize;
-        let head = u16::from_le(unsafe { ptr::read_volatile(avail.add(4 + slot * 2) as *const u16) });
+        let head =
+            u16::from_le(unsafe { ptr::read_volatile(avail.add(4 + slot * 2) as *const u16) });
         self.last_avail = self.last_avail.wrapping_add(1);
 
         // The head descriptor points at a writable buffer; fill it.
@@ -102,7 +110,11 @@ fn receive_buffers_are_posted_filled_and_reposted() {
     // Driver reaps it.
     let (index, len) = pool.poll(&mut rx).unwrap();
     assert_eq!(len, 100);
-    assert_eq!(pool.posted(), POOL - 1, "the filled buffer is no longer posted");
+    assert_eq!(
+        pool.posted(),
+        POOL - 1,
+        "the filled buffer is no longer posted"
+    );
 
     // The bytes really landed in that pool buffer.
     let received = unsafe { core::slice::from_raw_parts(bufs[index].cpu_ptr(), 100) };

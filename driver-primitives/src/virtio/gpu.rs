@@ -66,7 +66,12 @@ pub struct Rect {
 
 impl Rect {
     pub const fn new(x: u32, y: u32, width: u32, height: u32) -> Self {
-        Self { x, y, width, height }
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
     }
 }
 
@@ -328,7 +333,8 @@ impl<const Q: usize> VirtioGpu<Q> {
         CB: DmaRegion,
         RB: DmaRegion,
     {
-        let transfer = self.transfer_to_host_2d(transfer_cmd, transfer_resp, resource_id, rect, offset)?;
+        let transfer =
+            self.transfer_to_host_2d(transfer_cmd, transfer_resp, resource_id, rect, offset)?;
         let flush = self.resource_flush(flush_cmd, flush_resp, resource_id, rect)?;
         Ok((transfer, flush))
     }
@@ -367,7 +373,10 @@ mod tests {
     impl Buf {
         fn new(bytes: usize) -> Self {
             let units = bytes.div_ceil(16).max(1);
-            Buf { mem: vec![0u128; units], len: units * 16 }
+            Buf {
+                mem: vec![0u128; units],
+                len: units * 16,
+            }
         }
     }
     impl DmaRegion for Buf {

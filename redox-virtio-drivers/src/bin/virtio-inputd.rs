@@ -6,11 +6,15 @@
 //!
 //! Build for Redox: `cargo build --release --target x86_64-unknown-redox`.
 
-use driver_primitives::dma::DmaRegion;
-use driver_primitives::runtime::{self, Platform, PlatformError};
-use driver_primitives::virtio::input::{self};
-use driver_primitives::virtio::{VirtQueue, VirtioInput, VirtioMmio};
-use driver_primitives::Features;
+use driver_primitives::{
+    dma::DmaRegion,
+    runtime::{self, Platform, PlatformError},
+    virtio::{
+        input::{self},
+        VirtQueue, VirtioInput, VirtioMmio,
+    },
+    Features,
+};
 use redox_virtio_drivers::{DeviceLocation, RedoxPlatform};
 
 const QSIZE: usize = 64;
@@ -38,8 +42,10 @@ fn run(location: DeviceLocation) -> Result<(), PlatformError> {
         .collect::<Result<Vec<_>, _>>()?;
 
     let region = platform.alloc_dma(VirtQueue::<QSIZE>::required_bytes())?;
-    let queue = unsafe { VirtQueue::<QSIZE>::new(&region) }.map_err(|_| PlatformError::Unsupported)?;
-    mmio.setup_queue(0, &queue).map_err(|_| PlatformError::Unsupported)?;
+    let queue =
+        unsafe { VirtQueue::<QSIZE>::new(&region) }.map_err(|_| PlatformError::Unsupported)?;
+    mmio.setup_queue(0, &queue)
+        .map_err(|_| PlatformError::Unsupported)?;
     mmio.set_driver_ok();
 
     let descs: [(u64, u32); POOL] =

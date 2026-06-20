@@ -16,8 +16,7 @@
 //! [`mmio::Bank`]: crate::mmio::Bank
 //! [`mmio::Reg`]: crate::mmio::Reg
 
-use crate::feature::Features;
-use crate::mmio::Bank;
+use crate::{feature::Features, mmio::Bank};
 
 use super::queue::VirtQueue;
 

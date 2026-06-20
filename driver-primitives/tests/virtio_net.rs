@@ -4,12 +4,15 @@
 //! into a working network TX path; only the real transport (PCI/virtio-mmio
 //! discovery, IRQ binding) remains for actual hardware.
 
-use core::ptr;
-use core::sync::atomic::{fence, Ordering};
+use core::{
+    ptr,
+    sync::atomic::{fence, Ordering},
+};
 
-use driver_primitives::dma::DmaRegion;
-use driver_primitives::virtio::net::VirtioNetHdr;
-use driver_primitives::virtio::{Segment, VirtQueue, VirtioNet};
+use driver_primitives::{
+    dma::DmaRegion,
+    virtio::{net::VirtioNetHdr, Segment, VirtQueue, VirtioNet},
+};
 
 const Q: usize = 64;
 
@@ -59,7 +62,8 @@ impl MockDevice {
         }
         fence(Ordering::Acquire);
         let slot = (self.last_avail % Q as u16) as usize;
-        let head = u16::from_le(unsafe { ptr::read_volatile(avail.add(4 + slot * 2) as *const u16) });
+        let head =
+            u16::from_le(unsafe { ptr::read_volatile(avail.add(4 + slot * 2) as *const u16) });
         self.last_avail = self.last_avail.wrapping_add(1);
 
         let mut total: u32 = 0;
@@ -148,5 +152,9 @@ fn transmit_a_frame_end_to_end() {
     // Driver reaps the completed transmit; descriptors return to the free list.
     let used = nic.poll_tx().unwrap();
     assert_eq!(used.head, head);
-    assert_eq!(nic.tx.num_free(), Q as u16, "header + frame descriptors freed");
+    assert_eq!(
+        nic.tx.num_free(),
+        Q as u16,
+        "header + frame descriptors freed"
+    );
 }

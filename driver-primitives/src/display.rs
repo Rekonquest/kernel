@@ -16,8 +16,10 @@
 //! [`Fence`]: crate::fence::Fence
 //! [`SeqCounter`]: crate::fence::SeqCounter
 
-use crate::fence::{Fence, SeqCounter};
-use crate::txn::Transaction;
+use crate::{
+    fence::{Fence, SeqCounter},
+    txn::Transaction,
+};
 
 /// A display mode: resolution and refresh rate (milliHz, e.g. 60000 = 60 Hz).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -38,7 +40,9 @@ impl Mode {
 
     /// Whether this mode fits within `limit` on every axis.
     pub const fn fits_within(&self, limit: &Mode) -> bool {
-        self.width <= limit.width && self.height <= limit.height && self.refresh_mhz <= limit.refresh_mhz
+        self.width <= limit.width
+            && self.height <= limit.height
+            && self.refresh_mhz <= limit.refresh_mhz
     }
 }
 
@@ -161,7 +165,10 @@ impl<const N: usize> Display<N> {
     /// Atomically apply a staged modeset across every affected output: validate
     /// the whole batch, then commit it as a unit. On validation failure nothing
     /// changes — no screen is left half-configured.
-    pub fn commit<const M: usize>(&mut self, txn: Transaction<Change, M>) -> Result<(), Transaction<Change, M>> {
+    pub fn commit<const M: usize>(
+        &mut self,
+        txn: Transaction<Change, M>,
+    ) -> Result<(), Transaction<Change, M>> {
         if !self.check(&txn) {
             return Err(txn);
         }
@@ -174,9 +181,7 @@ impl<const N: usize> Display<N> {
     /// if the output is not enabled.
     pub fn flip(&mut self, output: usize, fb: FbId) -> Option<u64> {
         let o = self.outputs.get_mut(output)?;
-        if o.mode.is_none() {
-            return None;
-        }
+        o.mode?;
         let seq = o.flip_seq.next_point();
         o.pending_flip = Some(seq);
         o.fb = Some(fb);
@@ -186,10 +191,10 @@ impl<const N: usize> Display<N> {
     /// Signal a vblank on `output` (the IRQ handler's job), completing any
     /// pending page flip.
     pub fn vblank(&mut self, output: usize) {
-        if let Some(o) = self.outputs.get_mut(output) {
-            if let Some(seq) = o.pending_flip.take() {
-                o.vblank.signal(seq);
-            }
+        if let Some(o) = self.outputs.get_mut(output)
+            && let Some(seq) = o.pending_flip.take()
+        {
+            o.vblank.signal(seq);
         }
     }
 
@@ -206,9 +211,7 @@ impl<const N: usize> Display<N> {
                 .outputs
                 .get(output)
                 .is_some_and(|o| o.connected && mode.fits_within(&o.max_mode)),
-            Change::SetFb { output, .. } => {
-                self.outputs.get(output).is_some_and(|o| o.connected)
-            }
+            Change::SetFb { output, .. } => self.outputs.get(output).is_some_and(|o| o.connected),
             Change::Disable { output } => self.outputs.get(output).is_some(),
         }
     }
@@ -256,11 +259,23 @@ mod tests {
 
         // One commit reconfigures three monitors.
         let mut txn: Transaction<Change, 8> = Transaction::new();
-        txn.stage(Change::SetMode { output: 0, mode: mode_4k() }).unwrap();
+        txn.stage(Change::SetMode {
+            output: 0,
+            mode: mode_4k(),
+        })
+        .unwrap();
         txn.stage(Change::SetFb { output: 0, fb: 10 }).unwrap();
-        txn.stage(Change::SetMode { output: 1, mode: mode_1080p() }).unwrap();
+        txn.stage(Change::SetMode {
+            output: 1,
+            mode: mode_1080p(),
+        })
+        .unwrap();
         txn.stage(Change::SetFb { output: 1, fb: 11 }).unwrap();
-        txn.stage(Change::SetMode { output: 2, mode: mode_1080p() }).unwrap();
+        txn.stage(Change::SetMode {
+            output: 2,
+            mode: mode_1080p(),
+        })
+        .unwrap();
         txn.stage(Change::SetFb { output: 2, fb: 12 }).unwrap();
 
         assert!(display.commit(txn).is_ok());
@@ -277,15 +292,27 @@ mod tests {
 
         // Establish a baseline on output 0.
         let mut base: Transaction<Change, 2> = Transaction::new();
-        base.stage(Change::SetMode { output: 0, mode: mode_1080p() }).unwrap();
+        base.stage(Change::SetMode {
+            output: 0,
+            mode: mode_1080p(),
+        })
+        .unwrap();
         display.commit(base).unwrap();
         assert_eq!(display.output(0).unwrap().mode(), Some(mode_1080p()));
 
         // Now attempt an atomic commit that changes output 0 *and* a disconnected
         // output. Validation must fail and leave output 0 untouched.
         let mut bad: Transaction<Change, 4> = Transaction::new();
-        bad.stage(Change::SetMode { output: 0, mode: mode_4k() }).unwrap();
-        bad.stage(Change::SetMode { output: 3, mode: mode_1080p() }).unwrap(); // disconnected
+        bad.stage(Change::SetMode {
+            output: 0,
+            mode: mode_4k(),
+        })
+        .unwrap();
+        bad.stage(Change::SetMode {
+            output: 3,
+            mode: mode_1080p(),
+        })
+        .unwrap(); // disconnected
         assert!(display.commit(bad).is_err());
         // Output 0 still has the old mode — nothing was half-applied.
         assert_eq!(display.output(0).unwrap().mode(), Some(mode_1080p()));
@@ -297,7 +324,11 @@ mod tests {
         display.connect(0, mode_1080p()); // panel maxes at 1080p
 
         let mut txn: Transaction<Change, 2> = Transaction::new();
-        txn.stage(Change::SetMode { output: 0, mode: mode_4k() }).unwrap(); // too big
+        txn.stage(Change::SetMode {
+            output: 0,
+            mode: mode_4k(),
+        })
+        .unwrap(); // too big
         assert!(!display.check(&txn));
         assert!(display.commit(txn).is_err());
         assert_eq!(display.output(0).unwrap().mode(), None);
@@ -308,7 +339,11 @@ mod tests {
         let mut display: Display<2> = Display::new();
         display.connect(0, mode_4k());
         let mut txn: Transaction<Change, 2> = Transaction::new();
-        txn.stage(Change::SetMode { output: 0, mode: mode_4k() }).unwrap();
+        txn.stage(Change::SetMode {
+            output: 0,
+            mode: mode_4k(),
+        })
+        .unwrap();
         display.commit(txn).unwrap();
 
         let seq = display.flip(0, 42).unwrap();

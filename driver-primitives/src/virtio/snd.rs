@@ -96,15 +96,30 @@ impl<const CQ: usize, const TQ: usize> VirtioSnd<CQ, TQ> {
     }
 
     /// Prepare a stream.
-    pub fn prepare<C: DmaRegion, R: DmaRegion>(&mut self, cmd: &C, resp: &R, stream_id: u32) -> Result<u16, QueueError> {
+    pub fn prepare<C: DmaRegion, R: DmaRegion>(
+        &mut self,
+        cmd: &C,
+        resp: &R,
+        stream_id: u32,
+    ) -> Result<u16, QueueError> {
         self.pcm_command(cmd, resp, code::PCM_PREPARE, stream_id)
     }
     /// Start a stream.
-    pub fn start<C: DmaRegion, R: DmaRegion>(&mut self, cmd: &C, resp: &R, stream_id: u32) -> Result<u16, QueueError> {
+    pub fn start<C: DmaRegion, R: DmaRegion>(
+        &mut self,
+        cmd: &C,
+        resp: &R,
+        stream_id: u32,
+    ) -> Result<u16, QueueError> {
         self.pcm_command(cmd, resp, code::PCM_START, stream_id)
     }
     /// Stop a stream.
-    pub fn stop<C: DmaRegion, R: DmaRegion>(&mut self, cmd: &C, resp: &R, stream_id: u32) -> Result<u16, QueueError> {
+    pub fn stop<C: DmaRegion, R: DmaRegion>(
+        &mut self,
+        cmd: &C,
+        resp: &R,
+        stream_id: u32,
+    ) -> Result<u16, QueueError> {
         self.pcm_command(cmd, resp, code::PCM_STOP, stream_id)
     }
 

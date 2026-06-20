@@ -9,9 +9,11 @@
 //!
 //! Build for Redox: `cargo build --release --target x86_64-unknown-redox`.
 
-use driver_primitives::dma::DmaRegion;
-use driver_primitives::runtime::{self, Platform, PlatformError};
-use driver_primitives::virtio::{net, RxPool, VirtQueue, VirtioMmio, VirtioNet};
+use driver_primitives::{
+    dma::DmaRegion,
+    runtime::{self, Platform, PlatformError},
+    virtio::{net, RxPool, VirtQueue, VirtioMmio, VirtioNet},
+};
 use redox_virtio_drivers::{DeviceLocation, RedoxPlatform};
 
 const QSIZE: usize = 256;
@@ -33,7 +35,8 @@ fn run(location: DeviceLocation) -> Result<(), PlatformError> {
     let bank = unsafe { platform.map_mmio(location.mmio_phys, location.mmio_len) }?;
     let mmio = unsafe { VirtioMmio::new(bank) }.map_err(|_| PlatformError::Unsupported)?;
     let agreed = net::negotiate(mmio.device_features()).map_err(|_| PlatformError::Unsupported)?;
-    mmio.accept_features(agreed).map_err(|_| PlatformError::Unsupported)?;
+    mmio.accept_features(agreed)
+        .map_err(|_| PlatformError::Unsupported)?;
 
     // Receive data buffers, allocated first so they outlive the queues that
     // reference them.
@@ -44,10 +47,14 @@ fn run(location: DeviceLocation) -> Result<(), PlatformError> {
     // Queue 0 = receive, queue 1 = transmit.
     let rx_region = platform.alloc_dma(VirtQueue::<QSIZE>::required_bytes())?;
     let tx_region = platform.alloc_dma(VirtQueue::<QSIZE>::required_bytes())?;
-    let rx = unsafe { VirtQueue::<QSIZE>::new(&rx_region) }.map_err(|_| PlatformError::Unsupported)?;
-    let tx = unsafe { VirtQueue::<QSIZE>::new(&tx_region) }.map_err(|_| PlatformError::Unsupported)?;
-    mmio.setup_queue(0, &rx).map_err(|_| PlatformError::Unsupported)?;
-    mmio.setup_queue(1, &tx).map_err(|_| PlatformError::Unsupported)?;
+    let rx =
+        unsafe { VirtQueue::<QSIZE>::new(&rx_region) }.map_err(|_| PlatformError::Unsupported)?;
+    let tx =
+        unsafe { VirtQueue::<QSIZE>::new(&tx_region) }.map_err(|_| PlatformError::Unsupported)?;
+    mmio.setup_queue(0, &rx)
+        .map_err(|_| PlatformError::Unsupported)?;
+    mmio.setup_queue(1, &tx)
+        .map_err(|_| PlatformError::Unsupported)?;
     mmio.set_driver_ok();
 
     let mut nic = VirtioNet::new(rx, tx, agreed);

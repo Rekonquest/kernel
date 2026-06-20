@@ -6,9 +6,11 @@
 //!
 //! Build for Redox: `cargo build --release --target x86_64-unknown-redox`.
 
-use driver_primitives::runtime::{self, Platform, PlatformError};
-use driver_primitives::virtio::{snd, VirtQueue, VirtioMmio, VirtioSnd};
-use driver_primitives::Features;
+use driver_primitives::{
+    runtime::{self, Platform, PlatformError},
+    virtio::{snd, VirtQueue, VirtioMmio, VirtioSnd},
+    Features,
+};
 use redox_virtio_drivers::{DeviceLocation, RedoxPlatform};
 
 const QSIZE: usize = 64;
@@ -36,16 +38,29 @@ fn run(location: DeviceLocation) -> Result<(), PlatformError> {
 
     let cregion = platform.alloc_dma(VirtQueue::<QSIZE>::required_bytes())?;
     let tregion = platform.alloc_dma(VirtQueue::<QSIZE>::required_bytes())?;
-    let control = unsafe { VirtQueue::<QSIZE>::new(&cregion) }.map_err(|_| PlatformError::Unsupported)?;
-    let tx = unsafe { VirtQueue::<QSIZE>::new(&tregion) }.map_err(|_| PlatformError::Unsupported)?;
-    mmio.setup_queue(0, &control).map_err(|_| PlatformError::Unsupported)?;
-    mmio.setup_queue(1, &tx).map_err(|_| PlatformError::Unsupported)?;
+    let control =
+        unsafe { VirtQueue::<QSIZE>::new(&cregion) }.map_err(|_| PlatformError::Unsupported)?;
+    let tx =
+        unsafe { VirtQueue::<QSIZE>::new(&tregion) }.map_err(|_| PlatformError::Unsupported)?;
+    mmio.setup_queue(0, &control)
+        .map_err(|_| PlatformError::Unsupported)?;
+    mmio.setup_queue(1, &tx)
+        .map_err(|_| PlatformError::Unsupported)?;
     mmio.set_driver_ok();
     let mut audio = VirtioSnd::new(control, tx);
 
     // Configure PCM stream 0 (stereo, S16, 48 kHz).
     audio
-        .set_params(&cmd, &resp, STREAM, 8192, 2048, 2, snd::format::S16, snd::rate::R48000)
+        .set_params(
+            &cmd,
+            &resp,
+            STREAM,
+            8192,
+            2048,
+            2,
+            snd::format::S16,
+            snd::rate::R48000,
+        )
         .map_err(|_| PlatformError::Unsupported)?;
     mmio.notify(0);
 

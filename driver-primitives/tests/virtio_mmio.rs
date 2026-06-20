@@ -5,10 +5,14 @@
 //! The "device" is a flat register window the test pre-loads (read-only regs)
 //! and inspects (write-only regs) — the same window a real device exposes.
 
-use driver_primitives::dma::DmaRegion;
-use driver_primitives::mmio::Bank;
-use driver_primitives::virtio::transport::{regs, status, MAGIC_VALUE};
-use driver_primitives::virtio::{TransportError, VirtQueue, VirtioMmio};
+use driver_primitives::{
+    dma::DmaRegion,
+    mmio::Bank,
+    virtio::{
+        transport::{regs, status, MAGIC_VALUE},
+        TransportError, VirtQueue, VirtioMmio,
+    },
+};
 
 const Q: usize = 64;
 
@@ -20,7 +24,10 @@ struct DmaBuf {
 impl DmaBuf {
     fn new(bytes: usize) -> Self {
         let units = bytes.div_ceil(16).max(1);
-        DmaBuf { mem: vec![0u128; units], len: units * 16 }
+        DmaBuf {
+            mem: vec![0u128; units],
+            len: units * 16,
+        }
     }
 }
 impl DmaRegion for DmaBuf {
@@ -93,9 +100,12 @@ fn full_bring_up_sequence() {
 
     assert_eq!(rd(bank, regs::QUEUE_NUM), Q as u32);
     assert_eq!(rd(bank, regs::QUEUE_READY), 1);
-    let desc = ((rd(bank, regs::QUEUE_DESC_HIGH) as u64) << 32) | rd(bank, regs::QUEUE_DESC_LOW) as u64;
-    let avail = ((rd(bank, regs::QUEUE_DRIVER_HIGH) as u64) << 32) | rd(bank, regs::QUEUE_DRIVER_LOW) as u64;
-    let used = ((rd(bank, regs::QUEUE_DEVICE_HIGH) as u64) << 32) | rd(bank, regs::QUEUE_DEVICE_LOW) as u64;
+    let desc =
+        ((rd(bank, regs::QUEUE_DESC_HIGH) as u64) << 32) | rd(bank, regs::QUEUE_DESC_LOW) as u64;
+    let avail = ((rd(bank, regs::QUEUE_DRIVER_HIGH) as u64) << 32)
+        | rd(bank, regs::QUEUE_DRIVER_LOW) as u64;
+    let used = ((rd(bank, regs::QUEUE_DEVICE_HIGH) as u64) << 32)
+        | rd(bank, regs::QUEUE_DEVICE_LOW) as u64;
     assert_eq!(desc, vq.desc_addr());
     assert_eq!(avail, vq.avail_addr());
     assert_eq!(used, vq.used_addr());

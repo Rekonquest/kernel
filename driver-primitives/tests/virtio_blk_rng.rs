@@ -1,11 +1,15 @@
 //! Storage (virtio-blk) and entropy (virtio-rng) end to end against mock
 //! devices — two more device classes on the same kit.
 
-use core::ptr;
-use core::sync::atomic::{fence, Ordering};
+use core::{
+    ptr,
+    sync::atomic::{fence, Ordering},
+};
 
-use driver_primitives::dma::DmaRegion;
-use driver_primitives::virtio::{blk, VirtioBlk, VirtioRng, VirtQueue};
+use driver_primitives::{
+    dma::DmaRegion,
+    virtio::{blk, VirtQueue, VirtioBlk, VirtioRng},
+};
 
 const Q: usize = 64;
 
@@ -16,7 +20,10 @@ struct Dma {
 impl Dma {
     fn new(bytes: usize) -> Self {
         let units = bytes.div_ceil(16).max(1);
-        Dma { mem: vec![0u128; units], len: units * 16 }
+        Dma {
+            mem: vec![0u128; units],
+            len: units * 16,
+        }
     }
 }
 impl DmaRegion for Dma {
@@ -75,7 +82,8 @@ impl Mock {
         }
         fence(Ordering::Acquire);
         let slot = (self.last_avail % Q as u16) as usize;
-        let head = u16::from_le(unsafe { ptr::read_volatile(avail.add(4 + slot * 2) as *const u16) });
+        let head =
+            u16::from_le(unsafe { ptr::read_volatile(avail.add(4 + slot * 2) as *const u16) });
         self.last_avail = self.last_avail.wrapping_add(1);
         Some(head)
     }
@@ -112,11 +120,17 @@ fn blk_read_fills_data_and_reports_status() {
         let segs = chain(mock.base, h);
         assert_eq!(segs.len(), 3);
         // Header (readable): type IN, sector 42.
-        assert_eq!(u32::from_le(ptr::read_volatile(segs[0].0 as *const u32)), blk::req::IN);
-        assert_eq!(u64::from_le(ptr::read_volatile((segs[0].0 + 8) as *const u64)), 42);
+        assert_eq!(
+            u32::from_le(ptr::read_volatile(segs[0].0 as *const u32)),
+            blk::req::IN
+        );
+        assert_eq!(
+            u64::from_le(ptr::read_volatile((segs[0].0 + 8) as *const u64)),
+            42
+        );
         assert!(!segs[0].2); // header is device-readable
         assert!(segs[1].2); // data is device-writable for a read
-        // Fill the data buffer and set status OK.
+                            // Fill the data buffer and set status OK.
         for i in 0..segs[1].1 as usize {
             ptr::write_volatile((segs[1].0 as *mut u8).add(i), 0xEE);
         }
@@ -128,7 +142,11 @@ fn blk_read_fills_data_and_reports_status() {
     assert_eq!(VirtioBlk::<Q>::status_of(&st), blk::status::OK);
     let got = unsafe { core::slice::from_raw_parts(data.cpu_ptr(), blk::SECTOR_SIZE) };
     assert!(got.iter().all(|&b| b == 0xEE));
-    assert_eq!(dev.queue.num_free(), Q as u16, "all three descriptors freed");
+    assert_eq!(
+        dev.queue.num_free(),
+        Q as u16,
+        "all three descriptors freed"
+    );
 }
 
 #[test]

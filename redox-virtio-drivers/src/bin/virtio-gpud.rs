@@ -8,12 +8,14 @@
 //!
 //! Build for Redox: `cargo build --release --target x86_64-unknown-redox`.
 
-use driver_primitives::display::{Change, Display, Mode};
-use driver_primitives::dma::DmaRegion;
-use driver_primitives::runtime::{self, Platform, PlatformError};
-use driver_primitives::txn::Transaction;
-use driver_primitives::virtio::{gpu, Rect, VirtQueue, VirtioGpu, VirtioMmio};
-use driver_primitives::Features;
+use driver_primitives::{
+    display::{Change, Display, Mode},
+    dma::DmaRegion,
+    runtime::{self, Platform, PlatformError},
+    txn::Transaction,
+    virtio::{gpu, Rect, VirtQueue, VirtioGpu, VirtioMmio},
+    Features,
+};
 use redox_virtio_drivers::{DeviceLocation, RedoxPlatform};
 
 const QSIZE: usize = 64;
@@ -38,8 +40,10 @@ fn run(location: DeviceLocation) -> Result<(), PlatformError> {
 
     // Control queue (queue 0); its region outlives the queue.
     let ctrl_region = platform.alloc_dma(VirtQueue::<QSIZE>::required_bytes())?;
-    let ctrl = unsafe { VirtQueue::<QSIZE>::new(&ctrl_region) }.map_err(|_| PlatformError::Unsupported)?;
-    mmio.setup_queue(0, &ctrl).map_err(|_| PlatformError::Unsupported)?;
+    let ctrl =
+        unsafe { VirtQueue::<QSIZE>::new(&ctrl_region) }.map_err(|_| PlatformError::Unsupported)?;
+    mmio.setup_queue(0, &ctrl)
+        .map_err(|_| PlatformError::Unsupported)?;
     mmio.set_driver_ok();
     let mut gpu_dev = VirtioGpu::new(ctrl);
 
@@ -94,9 +98,7 @@ fn run(location: DeviceLocation) -> Result<(), PlatformError> {
 
     // 5. Service loop: drain completions on each interrupt. A framebuffer scheme
     //    would call present() again whenever a client requests a flip.
-    runtime::run(&mut platform, &mmio, || {
-        while gpu_dev.poll().is_some() {}
-    })
+    runtime::run(&mut platform, &mmio, || while gpu_dev.poll().is_some() {})
 }
 
 /// Block until one control-queue command completes (used during synchronous
