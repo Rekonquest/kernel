@@ -24,10 +24,20 @@
 //! | [`FairQueue`] | **cross-domain:** CPU sched (CFS/EEVDF) · GPU ctx priority · NIC flow WFQ · NVMe weighted queueing · audio mixing · TDMA |
 //! | [`CapabilityRing`] | **cross-domain:** dma-buf/PRIME · io_uring SQE · Wayland buffers · Redox scheme fd-passing |
 //! | [`Reactor`] | **the kit assembled:** io_uring-shaped submit/dispatch/complete/reap engine for any contended async resource |
+//! | [`mmio::Reg`] / [`dma::Descriptor`] | **hardware seam:** volatile registers · device-visible DMA buffers (virtio-compatible) |
 //!
 //! GPU, USB, WiFi, ethernet, audio, and storage are not six problems; they are
 //! six *orchestrations* of one kit. Build the kit once, dumb and tested; each
 //! driver becomes a thin policy layer on top.
+//!
+//! ## Hardware seam
+//!
+//! [`mmio`] (volatile registers) and [`dma`] (DMA regions + descriptors) are
+//! where the kit meets hardware, and they stay portable on purpose. [`dma::DmaRegion`]
+//! is a trait the OS satisfies — on Redox with `redox_syscall::Dma` — so the kit
+//! itself depends on no platform. The orchestrator maps an MMIO window (Redox's
+//! `memory` scheme) and hands its base to [`mmio::Bank`]; everything above stays
+//! the same dumb, tested machinery.
 //!
 //! ## Cross-domain
 //!
@@ -46,21 +56,25 @@
 //! delivery) belong to the orchestrator that wraps them.
 
 pub mod capability;
+pub mod dma;
 pub mod event;
 pub mod fairqueue;
 pub mod feature;
 pub mod fence;
 pub mod handle;
+pub mod mmio;
 pub mod reactor;
 pub mod ring;
 pub mod txn;
 
 pub use capability::{CapabilityRing, Grant};
+pub use dma::{Descriptor, DmaRegion};
 pub use event::EventQueue;
 pub use fairqueue::FairQueue;
 pub use feature::Features;
 pub use fence::{Fence, SeqCounter};
 pub use handle::{Handle, HandleTable};
+pub use mmio::{Bank, Reg};
 pub use reactor::{Completion, Reactor, SubmissionId, Ticket};
 pub use ring::{Full, Ring};
 pub use txn::Transaction;
