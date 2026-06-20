@@ -19,7 +19,7 @@ mod imp {
         close,
         data::Map,
         flag::{MapFlags, O_CLOEXEC, O_RDWR},
-        fmap, funmap, openat, read, write,
+        fmap, fpath, funmap, openat, read, write,
     };
 
     // Base fd for opening absolute, scheme-qualified paths (e.g. "irq:9"). The
@@ -31,16 +31,33 @@ mod imp {
         MapFlags::PROT_READ | MapFlags::PROT_WRITE | MapFlags::MAP_SHARED
     }
 
-    /// DMA-coherent memory, mapped from the memory scheme via `fmap`.
+    /// Extract the physical base from a `memory:physical` scheme path. Accepts a
+    /// hex base, optionally `0x`-prefixed and optionally a `<start>-<end>` range.
+    /// The exact path format is boot-verified.
+    fn parse_phys(path: &[u8]) -> Option<usize> {
+        let s = core::str::from_utf8(path).ok()?.trim();
+        let last = s.rsplit(['/', '=', '@', ':']).next()?;
+        let start = last.split('-').next()?.trim();
+        let start = start.strip_prefix("0x").unwrap_or(start);
+        usize::from_str_radix(start, 16).ok()
+    }
+
+    /// DMA-coherent memory: a physical allocation from the `memory:physical`
+    /// scheme, mapped for the CPU. `phys` is the device-visible base.
     pub struct RedoxDma {
         virt: *mut u8,
+        phys: usize,
         len: usize,
         scheme_fd: usize,
     }
 
     impl RedoxDma {
         pub fn new(len: usize) -> Result<Self, PlatformError> {
-            let scheme_fd = openat(ROOT_FD, "memory:", O_RDWR | O_CLOEXEC, 0)
+            // Allocate device-visible (physical) memory and read back its
+            // physical base, so phys_addr() reports what the device must DMA to —
+            // not the userspace virtual mapping. On any path mismatch we fail
+            // rather than hand out an address the device would corrupt.
+            let scheme_fd = openat(ROOT_FD, "memory:physical", O_RDWR | O_CLOEXEC, 0)
                 .map_err(|_| PlatformError::OutOfMemory)?;
             let map = Map {
                 offset: 0,
@@ -49,10 +66,16 @@ mod imp {
                 address: 0,
             };
             let virt = unsafe { fmap(scheme_fd, &map) }.map_err(|_| PlatformError::MapFailed)?;
+
+            let mut path = [0u8; 256];
+            let n = fpath(scheme_fd, &mut path).map_err(|_| PlatformError::MapFailed)?;
+            let phys = parse_phys(&path[..n.min(path.len())]).ok_or(PlatformError::MapFailed)?;
+
             // SAFETY: fmap returned a mapping of `len` bytes.
             unsafe { core::ptr::write_bytes(virt as *mut u8, 0, len) };
             Ok(Self {
                 virt: virt as *mut u8,
+                phys,
                 len,
                 scheme_fd,
             })
@@ -64,10 +87,9 @@ mod imp {
             self.virt
         }
         fn phys_addr(&self) -> u64 {
-            // The device-visible address. The memory scheme reports this back on
-            // map; wiring that is the boot-time step (see BOOTING.md). For an
-            // identity-mapped region it equals the virtual address.
-            self.virt as u64
+            // The device-visible physical base, read back from the allocation
+            // path — this is what gets programmed into virtqueue descriptors.
+            self.phys as u64
         }
         fn len(&self) -> usize {
             self.len

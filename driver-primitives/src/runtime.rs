@@ -64,9 +64,15 @@ pub fn run<P: Platform>(
             Err(PlatformError::Closed) => return Ok(()),
             Err(other) => return Err(other),
         }
+        // Acknowledge the device interrupt *before* draining the queues. If we
+        // acked after, a completion that lands between the service closure's
+        // last poll and the ack would have its freshly-set interrupt-status bit
+        // cleared by this stale ack, leaving a used-ring entry pending with no
+        // armed IRQ. Acking first means any post-drain completion re-raises the
+        // interrupt and wakes the next iteration.
         let causes = mmio.interrupt_status();
-        service();
         mmio.ack_interrupt(causes);
+        service();
         platform.ack_irq()?;
     }
 }

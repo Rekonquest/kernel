@@ -91,10 +91,13 @@ fn run(location: DeviceLocation) -> Result<(), PlatformError> {
         .map_err(|_| PlatformError::Unsupported)?;
     wait_completion(&mut platform, &mmio, &mut gpu_dev)?;
 
-    // 4. Present the initial frame (transfer + flush).
+    // 4. Present the initial frame (transfer + flush), then notify the device so
+    //    it processes the queued descriptors (otherwise runtime::run blocks on an
+    //    IRQ that never comes for this work).
     gpu_dev
         .present(&cmd, &resp, &tcmd, &tresp, FB_RESOURCE, rect, 0)
         .map_err(|_| PlatformError::Unsupported)?;
+    mmio.notify(0);
 
     // 5. Service loop: drain completions on each interrupt. A framebuffer scheme
     //    would call present() again whenever a client requests a flip.
