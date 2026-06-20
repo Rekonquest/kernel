@@ -13,6 +13,10 @@
 
 pub mod platform;
 
+/// Scheme servers (Redox-only). Compiled when targeting Redox.
+#[cfg(target_os = "redox")]
+pub mod scheme;
+
 pub use platform::{RedoxDma, RedoxPlatform};
 
 /// Device-location parameters a bus driver (e.g. pcid) hands a virtio daemon.

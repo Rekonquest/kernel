@@ -12,8 +12,9 @@ in `driver-primitives`.
 | File | Role |
 |------|------|
 | `src/platform.rs` | `RedoxPlatform` — DMA via `physalloc`/`physmap`, IRQ via the `irq` scheme. Real impl behind `cfg(target_os = "redox")`; a stub otherwise. |
-| `src/bin/virtio-netd.rs` | virtio-net daemon: map → negotiate → set up RX/TX queues → DRIVER_OK → interrupt-driven service loop. |
-| `src/bin/virtio-gpud.rs` | virtio-gpu daemon: bring up the control queue, discover monitors, configure them all in one atomic modeset. |
+| `src/bin/virtio-netd.rs` | virtio-net daemon: map → negotiate → set up RX/TX queues → **pre-post an RX buffer pool** → DRIVER_OK → interrupt loop draining TX completions and received frames (re-posting buffers). |
+| `src/bin/virtio-gpud.rs` | virtio-gpu daemon: bring up the control queue, discover monitors, configure them all in one atomic modeset, **set up scanout 0 with a framebuffer and present an initial frame**, then run the IRQ loop. |
+| `src/scheme.rs` | `network:` / framebuffer **scheme server skeletons** (Redox-only) — the OS-facing glue clients talk to. |
 
 ## Building
 
@@ -37,11 +38,16 @@ in `driver-primitives`.
 
 ## Honesty note
 
-The `cfg(target_os = "redox")` binding targets the `redox_syscall` API at the
-pinned revision (`physalloc`/`physmap`/`physunmap`/`physfree`, the `irq`
-scheme via `open`/`read`/`write`). It is **not compiled in this sandbox** — only
-the daemon logic above the seam is verified here. Expect to adjust a syscall
-signature or two against the exact `redox_syscall` version when you first build
-on the Redox target. The full driver also still needs: pre-posting RX buffers
-and a `network:` scheme (netd), and the page-flip/transfer/flush present loop
-wired to a framebuffer scheme (gpud).
+The `cfg(target_os = "redox")` code (`platform.rs`'s binding and `scheme.rs`'s
+servers) is **not compiled in this sandbox** — only the daemon logic above the
+seam is verified here. It targets the `redox_syscall` API at the pinned revision
+(`physalloc`/`physmap`/`physunmap`/`physfree`, the `irq` scheme, and
+`SchemeMut`/`Packet`); expect to adjust a signature or two against the exact
+version on first build for the Redox target.
+
+The device data paths are now in place and host-tested in `driver-primitives`:
+netd pre-posts an RX buffer pool and drains/re-posts on every interrupt; gpud
+sets up a scanout and presents (transfer + flush). What remains is wiring the
+**scheme servers** in `scheme.rs` to those data paths (RX frames in/out for
+`network:`, flip requests for the framebuffer) and multiplexing the scheme
+socket with the device IRQ via the `event:` scheme.
