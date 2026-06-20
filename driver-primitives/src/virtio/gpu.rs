@@ -307,6 +307,32 @@ impl<const Q: usize> VirtioGpu<Q> {
         self.submit(cmd, len, resp)
     }
 
+    /// Present an updated rectangle: copy it from the backing into the host
+    /// resource (`transfer_to_host_2d`) and then flush it to the scanout
+    /// (`resource_flush`). The two commands pipeline, so each needs its own
+    /// command/response buffer pair. Returns `(transfer_head, flush_head)`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn present<CA, RA, CB, RB>(
+        &mut self,
+        transfer_cmd: &CA,
+        transfer_resp: &RA,
+        flush_cmd: &CB,
+        flush_resp: &RB,
+        resource_id: u32,
+        rect: Rect,
+        offset: u64,
+    ) -> Result<(u16, u16), QueueError>
+    where
+        CA: DmaRegion,
+        RA: DmaRegion,
+        CB: DmaRegion,
+        RB: DmaRegion,
+    {
+        let transfer = self.transfer_to_host_2d(transfer_cmd, transfer_resp, resource_id, rect, offset)?;
+        let flush = self.resource_flush(flush_cmd, flush_resp, resource_id, rect)?;
+        Ok((transfer, flush))
+    }
+
     /// Present a rectangle of the resource to its scanout.
     pub fn resource_flush<C: DmaRegion, R: DmaRegion>(
         &mut self,

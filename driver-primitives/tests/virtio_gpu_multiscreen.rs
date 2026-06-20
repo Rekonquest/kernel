@@ -203,3 +203,35 @@ fn discover_monitors_configure_atomically_and_present() {
     // The control queue is balanced again after the whole present sequence.
     assert_eq!(gpu.control.num_free(), Q as u16);
 }
+
+#[test]
+fn present_issues_transfer_then_flush() {
+    let region = Dma::new(VirtQueue::<Q>::required_bytes());
+    let mut gpu = VirtioGpu::new(unsafe { VirtQueue::<Q>::new(&region).unwrap() });
+    let mut dev = MockGpu {
+        base: region.cpu_ptr(),
+        avail_off: VirtQueue::<Q>::AVAIL_OFFSET,
+        used_off: VirtQueue::<Q>::USED_OFFSET,
+        last_avail: 0,
+        used_idx: 0,
+        last_cmd_type: 0,
+    };
+
+    // Two command/response pairs so transfer and flush pipeline.
+    let (tc, tr) = (Dma::new(gpu::CMD_MAX_LEN), Dma::new(gpu::RESP_NODATA_LEN));
+    let (fc, fr) = (Dma::new(gpu::CMD_MAX_LEN), Dma::new(gpu::RESP_NODATA_LEN));
+    let rect = Rect::new(0, 0, 1920, 1080);
+
+    gpu.present(&tc, &tr, &fc, &fr, 1, rect, 0).unwrap();
+
+    // The device sees the transfer first...
+    assert!(unsafe { dev.service_one() });
+    assert_eq!(dev.last_cmd_type, ty::TRANSFER_TO_HOST_2D);
+    assert!(gpu.poll().is_some());
+    // ...then the flush.
+    assert!(unsafe { dev.service_one() });
+    assert_eq!(dev.last_cmd_type, ty::RESOURCE_FLUSH);
+    assert!(gpu.poll().is_some());
+
+    assert_eq!(gpu.control.num_free(), Q as u16, "both commands freed");
+}

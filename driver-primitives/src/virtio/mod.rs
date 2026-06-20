@@ -12,6 +12,6 @@ pub mod queue;
 pub mod transport;
 
 pub use gpu::{Rect, ScanoutInfo, VirtioGpu};
-pub use net::{VirtioNet, VirtioNetHdr};
+pub use net::{RxPool, VirtioNet, VirtioNetHdr};
 pub use queue::{QueueError, Segment, Used, VirtQueue, MAX_CHAIN};
 pub use transport::{TransportError, VirtioMmio};

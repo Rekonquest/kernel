@@ -147,6 +147,96 @@ impl<const RXQ: usize, const TXQ: usize> VirtioNet<RXQ, TXQ> {
     }
 }
 
+/// A pool of pre-posted receive buffers for a virtio-net RX queue.
+///
+/// The device can only deliver an incoming frame into a buffer the driver has
+/// already handed it, so a NIC keeps the RX ring full at all times. `post_all`
+/// fills it; `poll` returns each completed receive as the pool buffer index and
+/// the bytes written (virtio-net header included); `repost` returns a drained
+/// buffer to the device. Each buffer is one device-writable descriptor.
+pub struct RxPool<const POOL: usize> {
+    bufs: [RxBuf; POOL],
+}
+
+#[derive(Clone, Copy)]
+struct RxBuf {
+    phys: u64,
+    len: u32,
+    posted_head: Option<u16>,
+}
+
+impl<const POOL: usize> RxPool<POOL> {
+    /// Build a pool from `POOL` receive buffers, each given as `(phys_addr, len)`.
+    pub fn new(buffers: [(u64, u32); POOL]) -> Self {
+        Self {
+            bufs: buffers.map(|(phys, len)| RxBuf {
+                phys,
+                len,
+                posted_head: None,
+            }),
+        }
+    }
+
+    /// Post every not-yet-posted buffer to the RX queue so the device can
+    /// deliver frames into them.
+    pub fn post_all<const Q: usize>(&mut self, vq: &mut VirtQueue<Q>) -> Result<(), QueueError> {
+        for buf in self.bufs.iter_mut() {
+            if buf.posted_head.is_none() {
+                let head = vq.add_buf(&[Segment {
+                    addr: buf.phys,
+                    len: buf.len,
+                    device_writable: true,
+                }])?;
+                buf.posted_head = Some(head);
+            }
+        }
+        Ok(())
+    }
+
+    /// Reap one received frame: the pool buffer index it landed in and the bytes
+    /// the device wrote. The buffer is left un-posted — call [`repost`] once the
+    /// frame has been consumed.
+    ///
+    /// [`repost`]: RxPool::repost
+    pub fn poll<const Q: usize>(&mut self, vq: &mut VirtQueue<Q>) -> Option<(usize, u32)> {
+        let Used { head, len } = vq.poll_used()?;
+        let index = self.bufs.iter().position(|b| b.posted_head == Some(head))?;
+        self.bufs[index].posted_head = None;
+        Some((index, len))
+    }
+
+    /// Re-post buffer `index` to the device after its frame has been consumed.
+    pub fn repost<const Q: usize>(
+        &mut self,
+        vq: &mut VirtQueue<Q>,
+        index: usize,
+    ) -> Result<(), QueueError> {
+        let Some(buf) = self.bufs.get_mut(index) else {
+            return Ok(());
+        };
+        if buf.posted_head.is_some() {
+            return Ok(());
+        }
+        let head = vq.add_buf(&[Segment {
+            addr: buf.phys,
+            len: buf.len,
+            device_writable: true,
+        }])?;
+        buf.posted_head = Some(head);
+        Ok(())
+    }
+
+    /// The `(phys_addr, len)` of buffer `index`.
+    pub fn buffer(&self, index: usize) -> Option<(u64, u32)> {
+        self.bufs.get(index).map(|b| (b.phys, b.len))
+    }
+
+    /// Number of buffers currently posted to the device.
+    pub fn posted(&self) -> usize {
+        self.bufs.iter().filter(|b| b.posted_head.is_some()).count()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
