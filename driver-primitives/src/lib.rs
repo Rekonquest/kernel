@@ -22,6 +22,7 @@
 //! | [`EventQueue`] | eventfd/signalfd/timerfd/inotify · DRM events · GPIO line events · netlink async |
 //! | [`Transaction`] | DRM atomic modeset · any validate-then-commit batch |
 //! | [`FairQueue`] | **cross-domain:** CPU sched (CFS/EEVDF) · GPU ctx priority · NIC flow WFQ · NVMe weighted queueing · audio mixing · TDMA |
+//! | [`CapabilityRing`] | **cross-domain:** dma-buf/PRIME · io_uring SQE · Wayland buffers · Redox scheme fd-passing |
 //!
 //! GPU, USB, WiFi, ethernet, audio, and storage are not six problems; they are
 //! six *orchestrations* of one kit. Build the kit once, dumb and tested; each
@@ -43,6 +44,7 @@
 //! no locks — synchronization and the OS-facing glue (MMIO/DMA mapping, IRQ
 //! delivery) belong to the orchestrator that wraps them.
 
+pub mod capability;
 pub mod event;
 pub mod fairqueue;
 pub mod feature;
@@ -51,6 +53,7 @@ pub mod handle;
 pub mod ring;
 pub mod txn;
 
+pub use capability::{CapabilityRing, Grant};
 pub use event::EventQueue;
 pub use fairqueue::FairQueue;
 pub use feature::Features;
