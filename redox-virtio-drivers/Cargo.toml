@@ -26,3 +26,19 @@ path = "src/bin/virtio-netd.rs"
 [[bin]]
 name = "virtio-gpud"
 path = "src/bin/virtio-gpud.rs"
+
+[[bin]]
+name = "virtio-blkd"
+path = "src/bin/virtio-blkd.rs"
+
+[[bin]]
+name = "virtio-rngd"
+path = "src/bin/virtio-rngd.rs"
+
+[[bin]]
+name = "virtio-inputd"
+path = "src/bin/virtio-inputd.rs"
+
+[[bin]]
+name = "virtio-sndd"
+path = "src/bin/virtio-sndd.rs"

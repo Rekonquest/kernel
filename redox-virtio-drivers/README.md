@@ -12,9 +12,16 @@ in `driver-primitives`.
 | File | Role |
 |------|------|
 | `src/platform.rs` | `RedoxPlatform` — DMA via `physalloc`/`physmap`, IRQ via the `irq` scheme. Real impl behind `cfg(target_os = "redox")`; a stub otherwise. |
-| `src/bin/virtio-netd.rs` | virtio-net daemon: map → negotiate → set up RX/TX queues → **pre-post an RX buffer pool** → DRIVER_OK → interrupt loop draining TX completions and received frames (re-posting buffers). |
-| `src/bin/virtio-gpud.rs` | virtio-gpu daemon: bring up the control queue, discover monitors, configure them all in one atomic modeset, **set up scanout 0 with a framebuffer and present an initial frame**, then run the IRQ loop. |
+| `src/bin/virtio-netd.rs` | virtio-net: map → negotiate → set up RX/TX queues → **pre-post an RX buffer pool** → DRIVER_OK → interrupt loop draining TX completions and received frames (re-posting buffers). |
+| `src/bin/virtio-gpud.rs` | virtio-gpu: bring up the control queue, discover monitors, configure them all in one atomic modeset, **set up scanout 0 with a framebuffer and present an initial frame**, then run the IRQ loop. |
+| `src/bin/virtio-blkd.rs` | virtio-blk (storage): bring up the request queue, read sector 0, run the IRQ loop. |
+| `src/bin/virtio-rngd.rs` | virtio-rng (entropy): request entropy and re-request on completion. |
+| `src/bin/virtio-inputd.rs` | virtio-input (HID): pre-post event buffers, deliver/re-post events. |
+| `src/bin/virtio-sndd.rs` | virtio-snd (audio): control + transmit queues, configure PCM stream 0. |
 | `src/scheme.rs` | `network:` / framebuffer **scheme server skeletons** (Redox-only) — the OS-facing glue clients talk to. |
+
+All six daemons follow the same shape: construct `RedoxPlatform`, map the device,
+bring it up via the kit, drive its data path, and run `runtime::run` on the IRQ.
 
 ## Building
 
