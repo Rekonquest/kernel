@@ -20,10 +20,21 @@
 //! | [`HandleTable`] | fd table · GPU GEM handles · USB interface claims |
 //! | [`Features`] | virtio feature bits · DRM caps · ethtool NIC features · WiFi cipher/AKM suites · ALSA format/rate masks |
 //! | [`EventQueue`] | eventfd/signalfd/timerfd/inotify · DRM events · GPIO line events · netlink async |
+//! | [`Transaction`] | DRM atomic modeset · any validate-then-commit batch |
+//! | [`FairQueue`] | **cross-domain:** CPU sched (CFS/EEVDF) · GPU ctx priority · NIC flow WFQ · NVMe weighted queueing · audio mixing · TDMA |
 //!
 //! GPU, USB, WiFi, ethernet, audio, and storage are not six problems; they are
 //! six *orchestrations* of one kit. Build the kit once, dumb and tested; each
 //! driver becomes a thin policy layer on top.
+//!
+//! ## Cross-domain
+//!
+//! [`FairQueue`] is the kit reaching past drivers entirely: the same
+//! weighted virtual-time fairness the *kernel scheduler* uses to share the CPU
+//! is, structurally, what a NIC uses to share bandwidth and a GPU uses to share
+//! its engines. Lifting that math out of any one domain into a dumb, reusable
+//! arbiter is the doctrine's functional-completeness claim made literal — one
+//! small primitive spanning a space far larger than its origin suggests.
 //!
 //! ## Portability
 //!
@@ -33,16 +44,20 @@
 //! delivery) belong to the orchestrator that wraps them.
 
 pub mod event;
+pub mod fairqueue;
 pub mod feature;
 pub mod fence;
 pub mod handle;
 pub mod ring;
+pub mod txn;
 
 pub use event::EventQueue;
+pub use fairqueue::FairQueue;
 pub use feature::Features;
 pub use fence::{Fence, SeqCounter};
 pub use handle::{Handle, HandleTable};
 pub use ring::{Full, Ring};
+pub use txn::Transaction;
 
 #[cfg(test)]
 mod tests {
