@@ -13,8 +13,8 @@
 
 pub mod platform;
 
-/// Scheme servers (Redox-only). Compiled when targeting Redox.
-#[cfg(target_os = "redox")]
+/// Scheme front-ends (data-path queues). OS-agnostic and host-tested; the
+/// scheme server that drives them is Redox-specific (see BOOTING.md).
 pub mod scheme;
 
 pub use platform::{RedoxDma, RedoxPlatform};

@@ -17,28 +17,44 @@ mod imp {
     use super::*;
     use syscall::{
         close,
-        flag::{PhysmapFlags, O_CLOEXEC, O_RDWR},
-        open, physalloc, physfree, physmap, physunmap, read, write,
+        data::Map,
+        flag::{MapFlags, O_CLOEXEC, O_RDWR},
+        fmap, funmap, openat, read, write,
     };
 
-    /// DMA-coherent memory: a contiguous physical allocation mapped for the CPU.
+    // Base fd for opening absolute, scheme-qualified paths (e.g. "irq:9"). The
+    // exact convention is libredox's `open`; this uses the raw `openat` with a
+    // sentinel base. Boot-verify against the running system.
+    const ROOT_FD: usize = !0;
+
+    fn map_flags() -> MapFlags {
+        MapFlags::PROT_READ | MapFlags::PROT_WRITE | MapFlags::MAP_SHARED
+    }
+
+    /// DMA-coherent memory, mapped from the memory scheme via `fmap`.
     pub struct RedoxDma {
         virt: *mut u8,
-        phys: usize,
         len: usize,
+        scheme_fd: usize,
     }
 
     impl RedoxDma {
         pub fn new(len: usize) -> Result<Self, PlatformError> {
-            let phys = physalloc(len).map_err(|_| PlatformError::OutOfMemory)?;
-            let virt = unsafe { physmap(phys, len, PhysmapFlags::PHYSMAP_WRITE) }
-                .map_err(|_| PlatformError::MapFailed)?;
-            // SAFETY: physmap returned a mapping of `len` bytes.
+            let scheme_fd = openat(ROOT_FD, "memory:", O_RDWR | O_CLOEXEC, 0)
+                .map_err(|_| PlatformError::OutOfMemory)?;
+            let map = Map {
+                offset: 0,
+                size: len,
+                flags: map_flags(),
+                address: 0,
+            };
+            let virt = unsafe { fmap(scheme_fd, &map) }.map_err(|_| PlatformError::MapFailed)?;
+            // SAFETY: fmap returned a mapping of `len` bytes.
             unsafe { core::ptr::write_bytes(virt as *mut u8, 0, len) };
             Ok(Self {
                 virt: virt as *mut u8,
-                phys,
                 len,
+                scheme_fd,
             })
         }
     }
@@ -48,7 +64,10 @@ mod imp {
             self.virt
         }
         fn phys_addr(&self) -> u64 {
-            self.phys as u64
+            // The device-visible address. The memory scheme reports this back on
+            // map; wiring that is the boot-time step (see BOOTING.md). For an
+            // identity-mapped region it equals the virtual address.
+            self.virt as u64
         }
         fn len(&self) -> usize {
             self.len
@@ -57,8 +76,8 @@ mod imp {
 
     impl Drop for RedoxDma {
         fn drop(&mut self) {
-            let _ = unsafe { physunmap(self.virt as usize) };
-            let _ = physfree(self.phys, self.len);
+            let _ = unsafe { funmap(self.virt as usize, self.len) };
+            let _ = close(self.scheme_fd);
         }
     }
 
@@ -70,8 +89,8 @@ mod imp {
     impl RedoxPlatform {
         /// Open the `irq` scheme handle for the device's interrupt line.
         pub fn new(irq: u8) -> Result<Self, PlatformError> {
-            let path = format!("irq:{irq}");
-            let irq_fd = open(&path, O_RDWR | O_CLOEXEC).map_err(|_| PlatformError::Unsupported)?;
+            let irq_fd = openat(ROOT_FD, format!("irq:{irq}"), O_RDWR | O_CLOEXEC, 0)
+                .map_err(|_| PlatformError::Unsupported)?;
             Ok(Self { irq_fd })
         }
     }
@@ -84,15 +103,16 @@ mod imp {
         }
 
         unsafe fn map_mmio(&mut self, phys: u64, len: usize) -> Result<Bank, PlatformError> {
-            let virt = unsafe {
-                physmap(
-                    phys as usize,
-                    len,
-                    PhysmapFlags::PHYSMAP_WRITE | PhysmapFlags::PHYSMAP_NO_CACHE,
-                )
-            }
-            .map_err(|_| PlatformError::MapFailed)?;
-            // SAFETY: physmap returned a mapping covering the window.
+            let scheme_fd = openat(ROOT_FD, "memory:", O_RDWR | O_CLOEXEC, 0)
+                .map_err(|_| PlatformError::MapFailed)?;
+            let map = Map {
+                offset: phys as usize,
+                size: len,
+                flags: map_flags(),
+                address: 0,
+            };
+            let virt = unsafe { fmap(scheme_fd, &map) }.map_err(|_| PlatformError::MapFailed)?;
+            // SAFETY: fmap returned a mapping covering the window.
             Ok(unsafe { Bank::new(virt as *mut u8) })
         }
 

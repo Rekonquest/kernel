@@ -1,38 +1,25 @@
-//! Scheme servers — the OS-facing glue that exposes a driver to the rest of
-//! Redox, wired to the kit's data paths.
+//! Scheme front-ends — the data-path queues that connect Redox scheme clients
+//! to the driver.
 //!
-//! A network driver provides a `network:` scheme (read = receive a frame,
-//! write = send one); a GPU driver provides a framebuffer scheme (write =
-//! request a flip). The scheme types here hold the queues that connect client
-//! I/O to the driver's data path:
+//! A network driver exposes a `network:` scheme (read = receive a frame,
+//! write = send one); a GPU driver exposes a framebuffer scheme (write =
+//! request a flip). The types here hold the queues that bridge client I/O and
+//! the driver's data path:
 //!
 //! - the driver's IRQ handler calls [`NetScheme::deliver`] with each frame the
-//!   `RxPool` produced; a client `read` pops one;
-//! - a client `write` enqueues a frame, and the driver drains
+//!   `RxPool` produced; a client read pops one;
+//! - a client write enqueues a frame, and the driver drains
 //!   [`NetScheme::take_tx`] and hands each to `VirtioNet::transmit`.
 //!
-//! In production the driver runs **one event loop** that multiplexes the scheme
-//! socket and the device IRQ via the `event:` scheme, servicing whichever is
-//! ready (the standalone [`serve`] loop below shows the scheme half; see
-//! `BOOTING.md` for the multiplexed shape).
-//!
-//! This module is compiled only on Redox; CI cross-compiles it via `redoxer`,
-//! so the wiring is type-checked even though it can only *run* on a boot.
-
-#![cfg(target_os = "redox")]
+//! This logic is OS-agnostic and host-tested. The actual scheme *server* — the
+//! `SchemeMut`/packet loop that turns client syscalls into these calls — uses
+//! the modern `redox-scheme` crate and runs in one event loop multiplexed with
+//! the device IRQ via the `event:` scheme; see `BOOTING.md`.
 
 use std::collections::VecDeque;
-use std::mem::size_of;
 
-use syscall::{
-    data::Packet,
-    error::{Error, Result as SysResult, EWOULDBLOCK},
-    flag::{O_CLOEXEC, O_CREAT, O_RDWR},
-    open, read, write, SchemeMut,
-};
-
-/// `network:` scheme front-end, holding the received and to-transmit frame
-/// queues that bridge clients and the driver.
+/// `network:` scheme front-end: the received and to-transmit frame queues that
+/// bridge clients and the driver.
 #[derive(Default)]
 pub struct NetScheme {
     rx: VecDeque<Vec<u8>>,
@@ -46,8 +33,17 @@ impl NetScheme {
         self.rx.push_back(frame);
     }
 
-    /// Scheme → driver: the next frame a client asked to transmit, if any. The
-    /// driver hands it to `VirtioNet::transmit`.
+    /// A client read: take the next received frame, if any.
+    pub fn read_frame(&mut self) -> Option<Vec<u8>> {
+        self.rx.pop_front()
+    }
+
+    /// A client write: enqueue a frame to transmit.
+    pub fn write_frame(&mut self, frame: Vec<u8>) {
+        self.tx.push_back(frame);
+    }
+
+    /// Scheme → driver: the next frame to transmit (`VirtioNet::transmit`).
     pub fn take_tx(&mut self) -> Option<Vec<u8>> {
         self.tx.pop_front()
     }
@@ -55,33 +51,6 @@ impl NetScheme {
     /// Whether any client frames are waiting to be transmitted.
     pub fn has_tx(&self) -> bool {
         !self.tx.is_empty()
-    }
-}
-
-impl SchemeMut for NetScheme {
-    fn open(&mut self, _path: &str, _flags: usize, _uid: u32, _gid: u32) -> SysResult<usize> {
-        Ok(0)
-    }
-
-    fn read(&mut self, _id: usize, buf: &mut [u8]) -> SysResult<usize> {
-        match self.rx.pop_front() {
-            Some(frame) => {
-                let n = frame.len().min(buf.len());
-                buf[..n].copy_from_slice(&frame[..n]);
-                Ok(n)
-            }
-            // No frame pending; under O_NONBLOCK the client retries.
-            None => Err(Error::new(EWOULDBLOCK)),
-        }
-    }
-
-    fn write(&mut self, _id: usize, buf: &[u8]) -> SysResult<usize> {
-        self.tx.push_back(buf.to_vec());
-        Ok(buf.len())
-    }
-
-    fn close(&mut self, _id: usize) -> SysResult<usize> {
-        Ok(0)
     }
 }
 
@@ -93,53 +62,42 @@ pub struct FbScheme {
 }
 
 impl FbScheme {
-    /// How many flips clients have requested since the last drain.
-    pub fn take_flips(&mut self) -> usize {
-        core::mem::take(&mut self.flips_requested)
-    }
-}
-
-impl SchemeMut for FbScheme {
-    fn open(&mut self, _path: &str, _flags: usize, _uid: u32, _gid: u32) -> SysResult<usize> {
-        Ok(0)
-    }
-
-    fn write(&mut self, _id: usize, buf: &[u8]) -> SysResult<usize> {
-        // Any write is a flip request. A full driver also supports mmap of the
-        // framebuffer so clients draw directly.
+    /// A client requested a flip.
+    pub fn request_flip(&mut self) {
         self.flips_requested += 1;
-        Ok(buf.len())
     }
 
-    fn close(&mut self, _id: usize) -> SysResult<usize> {
-        Ok(0)
+    /// How many flips were requested since the last drain.
+    pub fn take_flips(&mut self) -> usize {
+        std::mem::take(&mut self.flips_requested)
     }
 }
 
-/// Register the scheme `name` (e.g. `"network"`) and run its packet loop until
-/// the socket closes. This drives only the scheme half; a real driver multiplexes
-/// this socket with the device IRQ via the `event:` scheme (see `BOOTING.md`).
-pub fn serve(name: &str, scheme: &mut impl SchemeMut) -> SysResult<()> {
-    let socket = open(format!(":{name}"), O_RDWR | O_CREAT | O_CLOEXEC)?;
-    loop {
-        let mut packet = Packet::default();
-        // A Packet is a fixed C struct; read/write it as raw bytes.
-        let got = {
-            let bytes = unsafe {
-                core::slice::from_raw_parts_mut(
-                    &mut packet as *mut Packet as *mut u8,
-                    size_of::<Packet>(),
-                )
-            };
-            read(socket, bytes)?
-        };
-        if got == 0 {
-            return Ok(());
-        }
-        scheme.handle(&mut packet);
-        let bytes = unsafe {
-            core::slice::from_raw_parts(&packet as *const Packet as *const u8, size_of::<Packet>())
-        };
-        write(socket, bytes)?;
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn net_scheme_bridges_rx_and_tx() {
+        let mut scheme = NetScheme::default();
+        // Driver delivers a received frame; a reader pops it.
+        scheme.deliver(vec![1, 2, 3]);
+        assert_eq!(scheme.read_frame(), Some(vec![1, 2, 3]));
+        assert_eq!(scheme.read_frame(), None);
+        // A writer enqueues; the driver drains it to transmit.
+        assert!(!scheme.has_tx());
+        scheme.write_frame(vec![4, 5]);
+        assert!(scheme.has_tx());
+        assert_eq!(scheme.take_tx(), Some(vec![4, 5]));
+        assert_eq!(scheme.take_tx(), None);
+    }
+
+    #[test]
+    fn fb_scheme_counts_flip_requests() {
+        let mut scheme = FbScheme::default();
+        scheme.request_flip();
+        scheme.request_flip();
+        assert_eq!(scheme.take_flips(), 2);
+        assert_eq!(scheme.take_flips(), 0); // drained
     }
 }

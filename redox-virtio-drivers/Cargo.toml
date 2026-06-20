@@ -13,9 +13,10 @@ driver-primitives = { path = "../driver-primitives" }
 
 # The Redox binding only needs redox_syscall when actually targeting Redox. On
 # any other host the crate builds against a stub Platform, so the daemon logic
-# still type-checks. Pinned to the same revision the kernel uses.
+# still type-checks. The `userspace` feature (default) provides the syscall
+# wrappers a driver calls — unlike the kernel, which disables them.
 [target.'cfg(target_os = "redox")'.dependencies]
-redox_syscall = { git = "https://gitlab.redox-os.org/redox-os/syscall.git", rev = "79cb6d9057642be31623677458a93aa88145864f", default-features = false }
+redox_syscall = { git = "https://gitlab.redox-os.org/redox-os/syscall.git", rev = "79cb6d9057642be31623677458a93aa88145864f", features = ["userspace"] }
 
 [lib]
 
