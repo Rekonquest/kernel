@@ -1,0 +1,4 @@
+[toolchain]
+# Builds on stable for host type-checking; the Redox target build uses redoxer's
+# toolchain (see .github/workflows/ci.yml and BOOTING.md).
+channel = "stable"

@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  driver-primitives:
+    name: driver-primitives (test · bare-metal · lint)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: driver-primitives
+    steps:
+      - uses: actions/checkout@v4
+      # The crate's rust-toolchain.toml pins stable + the bare-metal target.
+      - name: Install components
+        run: rustup component add clippy rustfmt
+      - name: Format
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Test
+        run: cargo test
+      - name: Build for bare metal (no_std, freestanding)
+        run: cargo build --release --target x86_64-unknown-none
+
+  redox-virtio-drivers:
+    name: redox-virtio-drivers (host check · lint)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: redox-virtio-drivers
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install components
+        run: rustup component add clippy rustfmt
+      - name: Format
+        run: cargo fmt --check
+      # Host build checks the daemon logic through the stub Platform; the
+      # cfg(target_os = "redox") binding is exercised by the redox-cross-build job.
+      - name: Clippy
+        run: cargo clippy --bins -- -D warnings
+      - name: Check
+        run: cargo check --bins
+
+  kernel-check:
+    name: kernel make check (x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nasm
+        run: sudo apt-get update && sudo apt-get install -y nasm
+      # The repo root's rust-toolchain.toml pins the kernel's nightly (+ rust-src).
+      # cargo auto-installs it on first use.
+      - name: Prime toolchain
+        run: cargo --version
+      - name: make check
+        run: make check
+
+  redox-cross-build:
+    name: redox cross-build via redoxer (experimental)
+    runs-on: ubuntu-latest
+    # Best-effort: compiles the cfg(target_os = "redox") binding (RedoxPlatform,
+    # schemes) against the real Redox target, catching syscall-API drift. Downloads
+    # the Redox toolchain, so it is allowed to fail without blocking CI.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install redoxer
+        run: cargo install redoxer
+      - name: Fetch the Redox toolchain
+        run: redoxer toolchain
+      - name: Cross-build the drivers for Redox
+        working-directory: redox-virtio-drivers
+        run: redoxer build --release
