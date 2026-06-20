@@ -9,6 +9,7 @@
 //! a "change" *is* and how it applies are the orchestrator's job.
 
 /// A bounded batch of staged changes of type `C`.
+#[derive(Debug)]
 pub struct Transaction<C, const N: usize> {
     staged: [Option<C>; N],
     len: usize,

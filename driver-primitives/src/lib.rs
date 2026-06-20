@@ -25,6 +25,7 @@
 //! | [`CapabilityRing`] | **cross-domain:** dma-buf/PRIME · io_uring SQE · Wayland buffers · Redox scheme fd-passing |
 //! | [`Reactor`] | **the kit assembled:** io_uring-shaped submit/dispatch/complete/reap engine for any contended async resource |
 //! | [`mmio::Reg`] / [`dma::Descriptor`] | **hardware seam:** volatile registers · device-visible DMA buffers (virtio-compatible) |
+//! | [`Display`] | **multi-screen:** atomic multi-output modeset (= `Transaction`) · page-flip/vblank (= `Fence`) |
 //!
 //! GPU, USB, WiFi, ethernet, audio, and storage are not six problems; they are
 //! six *orchestrations* of one kit. Build the kit once, dumb and tested; each
@@ -56,6 +57,7 @@
 //! delivery) belong to the orchestrator that wraps them.
 
 pub mod capability;
+pub mod display;
 pub mod dma;
 pub mod event;
 pub mod fairqueue;
@@ -69,6 +71,7 @@ pub mod txn;
 pub mod virtio;
 
 pub use capability::{CapabilityRing, Grant};
+pub use display::{Display, Mode};
 pub use dma::{Descriptor, DmaRegion};
 pub use event::EventQueue;
 pub use fairqueue::FairQueue;
