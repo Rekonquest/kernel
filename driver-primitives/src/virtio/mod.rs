@@ -8,14 +8,18 @@
 
 pub mod blk;
 pub mod gpu;
+pub mod input;
 pub mod net;
 pub mod queue;
 pub mod rng;
+pub mod snd;
 pub mod transport;
 
 pub use blk::VirtioBlk;
 pub use gpu::{Rect, ScanoutInfo, VirtioGpu};
+pub use input::{InputEvent, VirtioInput};
 pub use net::{RxPool, VirtioNet, VirtioNetHdr};
 pub use queue::{QueueError, Segment, Used, VirtQueue, MAX_CHAIN};
 pub use rng::VirtioRng;
+pub use snd::VirtioSnd;
 pub use transport::{TransportError, VirtioMmio};
