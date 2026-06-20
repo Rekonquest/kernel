@@ -17,6 +17,9 @@
 //! |-----------|------------|
 //! | [`Ring`]  | virtio avail/used · USB URB submit/reap · NVMe SQ/CQ · GPU command IB · V4L2/ALSA QBUF/DQBUF |
 //! | [`Fence`] + [`SeqCounter`] | GPU timeline syncobj · command-completion sequence numbers · "has progress reached N?" |
+//! | [`HandleTable`] | fd table · GPU GEM handles · USB interface claims |
+//! | [`Features`] | virtio feature bits · DRM caps · ethtool NIC features · WiFi cipher/AKM suites · ALSA format/rate masks |
+//! | [`EventQueue`] | eventfd/signalfd/timerfd/inotify · DRM events · GPIO line events · netlink async |
 //!
 //! GPU, USB, WiFi, ethernet, audio, and storage are not six problems; they are
 //! six *orchestrations* of one kit. Build the kit once, dumb and tested; each
@@ -29,10 +32,16 @@
 //! no locks — synchronization and the OS-facing glue (MMIO/DMA mapping, IRQ
 //! delivery) belong to the orchestrator that wraps them.
 
+pub mod event;
+pub mod feature;
 pub mod fence;
+pub mod handle;
 pub mod ring;
 
+pub use event::EventQueue;
+pub use feature::Features;
 pub use fence::{Fence, SeqCounter};
+pub use handle::{Handle, HandleTable};
 pub use ring::{Full, Ring};
 
 #[cfg(test)]
@@ -73,5 +82,42 @@ mod tests {
         }
         // And a never-issued future point is still pending.
         assert!(!completion.is_passed(seq.peek() + 1));
+    }
+
+    #[test]
+    fn device_registry_negotiates_and_emits_events() {
+        // 1. Negotiate features: device offers {0,1,2}, driver wants {1,2,3},
+        //    and feature 1 is mandatory.
+        let offered = Features::from_bits(0b0111);
+        let requested = Features::from_bits(0b1110);
+        let required = Features::bit(1);
+        let agreed =
+            feature::negotiate_checked(offered, requested, required).expect("feature 1 survived");
+        assert_eq!(agreed.bits(), 0b0110);
+
+        // 2. Register two devices; keep them addressable by opaque handle.
+        let mut devices: HandleTable<&str, 4> = HandleTable::new();
+        let nic = devices.alloc("nic0").unwrap();
+        let gpu = devices.alloc("gpu0").unwrap();
+
+        // 3. Emit completion events tagged by the device handle. The queue
+        //    holds two; the third overflows and is counted, not lost silently.
+        let mut events: EventQueue<(Handle, u8), 2> = EventQueue::new();
+        assert!(events.post((nic, 1)));
+        assert!(events.post((gpu, 1)));
+        assert!(!events.post((nic, 2)));
+        assert_eq!(events.lost(), 1);
+
+        // 4. Drain and resolve handles back to devices.
+        let mut buf = [(nic, 0u8); 4];
+        let n = events.drain_into(&mut buf);
+        assert_eq!(n, 2);
+        assert_eq!(devices.get(buf[0].0), Some(&"nic0"));
+        assert_eq!(devices.get(buf[1].0), Some(&"gpu0"));
+
+        // 5. Tear down a device; its handle goes stale immediately.
+        assert_eq!(devices.remove(nic), Some("nic0"));
+        assert_eq!(devices.get(nic), None);
+        assert_eq!(devices.get(gpu), Some(&"gpu0"));
     }
 }
