@@ -67,6 +67,7 @@ pub mod handle;
 pub mod mmio;
 pub mod reactor;
 pub mod ring;
+pub mod runtime;
 pub mod txn;
 pub mod virtio;
 
@@ -81,6 +82,7 @@ pub use handle::{Handle, HandleTable};
 pub use mmio::{Bank, Reg};
 pub use reactor::{Completion, Reactor, SubmissionId, Ticket};
 pub use ring::{Full, Ring};
+pub use runtime::{Platform, PlatformError};
 pub use txn::Transaction;
 
 #[cfg(test)]
