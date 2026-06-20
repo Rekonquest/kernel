@@ -6,6 +6,8 @@
 //! (virtio-net, virtio-blk, virtio-gpu) is then policy on top of it plus the
 //! [`Reactor`](crate::reactor::Reactor) for submission/completion tracking.
 
+pub mod net;
 pub mod queue;
 
+pub use net::{VirtioNet, VirtioNetHdr};
 pub use queue::{QueueError, Segment, Used, VirtQueue, MAX_CHAIN};
