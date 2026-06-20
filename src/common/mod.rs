@@ -1,4 +1,5 @@
 pub mod aligned_box;
+pub mod event_ring;
 #[macro_use]
 pub mod int_like;
 

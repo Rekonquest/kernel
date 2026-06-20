@@ -3,6 +3,7 @@
 //! of the scheme.
 
 use crate::{
+    common::event_ring::EventRing,
     event,
     percpu::PercpuBlock,
     scheme::SchemeExt,
@@ -10,10 +11,20 @@ use crate::{
     syscall::{data::PtraceEvent, error::*, flag::*, ptrace_event},
 };
 
-use alloc::{collections::VecDeque, sync::Arc};
-use core::cmp;
+use alloc::sync::Arc;
 use spin::Mutex;
 use syscall::data::GlobalSchemes;
+
+/// Capacity of a tracee session's pending-event ring.
+///
+/// Events here are *informational*: the stop/continue handshake runs over
+/// [`Session::tracee`]/[`Session::tracer`] and `breakpoint.reached`, not this
+/// ring. So on overflow the newest event is dropped and counted (see
+/// [`EventRing`]) rather than growing kernel memory without bound behind a slow
+/// or absent tracer. One slot per concurrently-stopped thread plus unread
+/// notifications is plenty; 128 slots cost ~8 KiB per active session
+/// (`size_of::<Option<PtraceEvent>>()` is 64 bytes on 64-bit).
+const EVENT_QUEUE_CAP: usize = 128;
 
 //  ____                _
 // / ___|  ___  ___ ___(_) ___  _ __  ___
@@ -24,16 +35,29 @@ use syscall::data::GlobalSchemes;
 #[derive(Debug)]
 pub struct SessionData {
     pub(crate) breakpoint: Option<Breakpoint>,
-    events: VecDeque<PtraceEvent>,
+    events: EventRing<PtraceEvent, EVENT_QUEUE_CAP>,
     file_id: usize,
 }
 impl SessionData {
     fn add_event(&mut self, event: PtraceEvent, token: &mut CleanLockToken) {
-        self.events.push_back(event);
+        // Capture the empty -> non-empty edge before posting: the tracer is
+        // notified only on that edge (it drains everything once woken).
+        let was_empty = self.events.is_empty();
 
-        // Notify nonblocking tracers
-        if self.events.len() == 1 {
-            // If the list of events was previously empty, alert now
+        if !self.events.post(event) {
+            // Ring full (a slow or absent tracer). The event is dropped and
+            // counted rather than blocking the tracee or growing without bound;
+            // the already-queued stream stays intact and ordered.
+            warn!(
+                "ptrace: session {} event queue full, event dropped (lost={})",
+                self.file_id,
+                self.events.lost(),
+            );
+            return;
+        }
+
+        // Notify nonblocking tracers on the empty -> non-empty edge only.
+        if was_empty {
             proc_trigger_event(self.file_id, EVENT_READ, token);
         }
     }
@@ -66,11 +90,7 @@ impl SessionData {
 
     /// Poll events, return the amount read. This drains events from the queue.
     pub fn recv_events(&mut self, out: &mut [PtraceEvent]) -> usize {
-        let len = cmp::min(out.len(), self.events.len());
-        for (dst, src) in out.iter_mut().zip(self.events.drain(..len)) {
-            *dst = src;
-        }
-        len
+        self.events.drain_into(out)
     }
 }
 
@@ -92,7 +112,7 @@ impl Session {
         Arc::new(Session {
             data: Mutex::new(SessionData {
                 breakpoint: None,
-                events: VecDeque::new(),
+                events: EventRing::new(),
                 file_id,
             }),
             tracee: WaitCondition::new(),
