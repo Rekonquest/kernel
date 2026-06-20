@@ -66,6 +66,7 @@ pub mod mmio;
 pub mod reactor;
 pub mod ring;
 pub mod txn;
+pub mod virtio;
 
 pub use capability::{CapabilityRing, Grant};
 pub use dma::{Descriptor, DmaRegion};
