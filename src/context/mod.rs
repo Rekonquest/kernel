@@ -3,7 +3,7 @@
 //! For resources on contexts, please consult [wikipedia](https://en.wikipedia.org/wiki/Context_switch) and  [osdev](https://wiki.osdev.org/Context_Switching)
 
 use alloc::{
-    collections::{BTreeMap, BTreeSet, VecDeque},
+    collections::{BTreeSet, VecDeque},
     sync::{Arc, Weak},
 };
 use core::{cmp::Reverse, num::NonZeroUsize, ops::Deref};
@@ -21,6 +21,7 @@ use crate::{
 };
 
 use self::context::Kstack;
+use self::run_queue::RunQueue;
 pub use self::{
     context::{BorrowedHtBuf, Context, Status},
     switch::switch,
@@ -50,6 +51,9 @@ pub mod context;
 
 /// Pure EEVDF scheduling policy (the orchestrator half of the scheduler).
 pub mod eevdf;
+
+/// The scheduler run queue (the mechanism the EEVDF policy drives).
+pub mod run_queue;
 
 /// Context switch function
 pub mod switch;
@@ -84,23 +88,15 @@ static RUN_CONTEXTS: Mutex<L1, RunContextData> = Mutex::new(RunContextData::new(
 static IDLE_CONTEXTS: Mutex<L2, VecDeque<WeakContextRef>> = Mutex::new(VecDeque::new());
 
 pub struct RunContextData {
-    // queue: VecDeque<WeakContextRef>,
-    queue: BTreeMap<(u64, Reverse<u64>, u32), (u64, u64, WeakContextRef)>, // ((vd, rem_slice, ctxt_id), (vtime, weight, context))
+    queue: RunQueue<WeakContextRef>,
     count: usize,
-    v: u64,
-    total_weight: u64,
-    min_vtime: u64,
 }
 
 impl RunContextData {
     pub const fn new() -> Self {
-        const EMPTY_VEC: VecDeque<WeakContextRef> = VecDeque::new();
         Self {
-            queue: BTreeMap::new(),
+            queue: RunQueue::new(),
             count: 0,
-            v: 0,
-            total_weight: 0,
-            min_vtime: 0,
         }
     }
     pub fn update_count(&mut self) -> usize {

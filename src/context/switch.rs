@@ -201,7 +201,7 @@ pub fn switch(token: &mut CleanLockToken) -> SwitchResult {
                 vd: guard.vd,
                 rem_slice: guard.rem_slice,
             };
-            eevdf::activate(&mut e, weight, run_contexts.v);
+            eevdf::activate(&mut e, weight, run_contexts.queue.v());
             guard.vtime = e.vtime;
             guard.vd = e.vd;
             guard.rem_slice = e.rem_slice;
@@ -209,7 +209,7 @@ pub fn switch(token: &mut CleanLockToken) -> SwitchResult {
             // Mechanism: account the now-active weight and enqueue.
             if !guard.is_active {
                 guard.is_active = true;
-                run_contexts.total_weight += weight;
+                run_contexts.queue.add_weight(weight);
             }
 
             let new_vtime = guard.vtime;
@@ -462,7 +462,7 @@ fn select_next_context(
             weight,
             elapsed_ticks,
             eevdf::is_yield(elapsed_time),
-            contexts_data.v,
+            contexts_data.queue.v(),
         );
         prev_context_guard.vtime = e.vtime;
         prev_context_guard.vd = e.vd;
@@ -472,7 +472,7 @@ fn select_next_context(
         if prev_context_guard.is_active {
             prev_context_guard.is_active = false;
             let weight = eevdf::weight_of(prev_context_guard.prio);
-            contexts_data.total_weight = contexts_data.total_weight.saturating_sub(weight);
+            contexts_data.queue.sub_weight(weight);
         }
         prev_context_guard.rem_slice = 0;
     }
@@ -485,7 +485,7 @@ fn select_next_context(
     let mut ineligible_vd = u64::MAX;
 
     if prev_runnable {
-        if eevdf::eligible(prev_context_guard.vtime, contexts_data.v) {
+        if eevdf::eligible(prev_context_guard.vtime, contexts_data.queue.v()) {
             prev_is_eligible = true;
         } else {
             ineligible_min_vtime = prev_context_guard.vtime;
@@ -499,7 +499,7 @@ fn select_next_context(
     for ((vd, rem_slice, ctxt_id), (vtime, context_weight, context_ref)) in
         contexts_data.queue.iter()
     {
-        if *vtime > ineligible_min_vtime && *vtime > contexts_data.v {
+        if *vtime > ineligible_min_vtime && *vtime > contexts_data.queue.v() {
             continue;
         }
 
@@ -552,7 +552,7 @@ fn select_next_context(
             }
         }
 
-        if eevdf::eligible(*vtime, contexts_data.v) {
+        if eevdf::eligible(*vtime, contexts_data.queue.v()) {
             // Eligible
             eligible_best = Some((guard, best_addr_space));
             break;
@@ -570,7 +570,7 @@ fn select_next_context(
         }
     }
 
-    contexts_data.total_weight = contexts_data.total_weight.saturating_sub(weight_change);
+    contexts_data.queue.sub_weight(weight_change);
 
     for old_key in contexts_to_remove {
         contexts_data.queue.remove(&old_key);
@@ -578,7 +578,7 @@ fn select_next_context(
 
     // No eligible context was found
     if !(prev_is_eligible || eligible_best.is_some()) && ineligible_min_vtime != u64::MAX {
-        contexts_data.v = ineligible_min_vtime; // Advance V
+        contexts_data.queue.set_v(ineligible_min_vtime); // Advance V
 
         let prev_is_earliest = prev_runnable && prev_context_guard.vtime <= ineligible_min_vtime;
 
@@ -623,7 +623,8 @@ fn select_next_context(
 
     if final_winner.is_some() || prev_runnable {
         // Policy: advance global virtual time by the slice, normalised by active weight.
-        contexts_data.v += eevdf::v_advance(elapsed_ticks, contexts_data.total_weight);
+        let v_delta = eevdf::v_advance(elapsed_ticks, contexts_data.queue.total_weight());
+        contexts_data.queue.advance_v(v_delta);
 
         if let Some((chosen_guard, addr_space)) = final_winner {
             if prev_runnable {
