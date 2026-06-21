@@ -1,0 +1,11 @@
+[package]
+name = "driver-primitives"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "A dumb-mechanism primitive kit for device drivers (ring, fence, ...), re-derived from published device ABIs."
+
+# Own workspace so this crate is isolated from the kernel's build/workspace.
+[workspace]
+
+[lib]

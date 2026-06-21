@@ -1,0 +1,5 @@
+[toolchain]
+# The portable kit builds on stable; pinned here so it is decoupled from the
+# kernel's nightly pin (which the repo root's rust-toolchain.toml sets).
+channel = "stable"
+targets = ["x86_64-unknown-none"]

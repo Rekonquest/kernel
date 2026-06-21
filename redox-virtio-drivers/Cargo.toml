@@ -1,0 +1,45 @@
+[package]
+name = "redox-virtio-drivers"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Redox userspace virtio driver daemons built from driver-primitives."
+
+# Own workspace, isolated from the kernel and the kit.
+[workspace]
+
+[dependencies]
+driver-primitives = { path = "../driver-primitives" }
+
+# The Redox binding only needs redox_syscall when actually targeting Redox. On
+# any other host the crate builds against a stub Platform, so the daemon logic
+# still type-checks. The `userspace` feature (default) provides the syscall
+# wrappers a driver calls — unlike the kernel, which disables them.
+[target.'cfg(target_os = "redox")'.dependencies]
+redox_syscall = { git = "https://gitlab.redox-os.org/redox-os/syscall.git", rev = "79cb6d9057642be31623677458a93aa88145864f", features = ["userspace"] }
+
+[lib]
+
+[[bin]]
+name = "virtio-netd"
+path = "src/bin/virtio-netd.rs"
+
+[[bin]]
+name = "virtio-gpud"
+path = "src/bin/virtio-gpud.rs"
+
+[[bin]]
+name = "virtio-blkd"
+path = "src/bin/virtio-blkd.rs"
+
+[[bin]]
+name = "virtio-rngd"
+path = "src/bin/virtio-rngd.rs"
+
+[[bin]]
+name = "virtio-inputd"
+path = "src/bin/virtio-inputd.rs"
+
+[[bin]]
+name = "virtio-sndd"
+path = "src/bin/virtio-sndd.rs"
