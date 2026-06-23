@@ -47,11 +47,15 @@ const WALL_CAPACITY: usize = 256;
 const ROOT_DOMAIN: DomainId = DomainId(0);
 
 /// The orchestrator's mutable security state: the capability wall (mechanism)
-/// plus the domain index mapping a structural domain identity to the capability
-/// the orchestrator issued it. One capability per domain.
+/// plus a domain index. A domain maps to one of three states, and the three are
+/// kept distinct — conflating them is how the gate was unsound before:
+///   - `Some(token)` — granted; holds the named capability;
+///   - `None`        — a **tombstone**: authority was explicitly revoked and must
+///                     not be re-granted while the domain stays alive;
+///   - absent        — never seen (first contact).
 struct SecurityState {
     wall: AuthorityWall<WALL_CAPACITY>,
-    domains: BTreeMap<DomainId, CapToken>,
+    domains: BTreeMap<DomainId, Option<CapToken>>,
 }
 
 impl SecurityState {
@@ -63,35 +67,60 @@ impl SecurityState {
     }
 
     /// Grant `domain` exactly `authority`, revoking any capability it previously
-    /// held (so a stale authority can never outlive a re-grant).
+    /// held and clearing any tombstone.
     fn grant(&mut self, domain: DomainId, authority: Authority) {
-        if let Some(old) = self.domains.remove(&domain) {
+        if let Some(Some(old)) = self.domains.insert(domain, None) {
             self.wall.revoke(old);
         }
         if let Ok(token) = self.wall.issue(domain, authority) {
-            self.domains.insert(domain, token);
+            self.domains.insert(domain, Some(token));
         }
     }
 
     fn authorizes(&self, domain: DomainId, needed: Authority) -> bool {
         match self.domains.get(&domain) {
-            Some(token) => self.wall.authorizes(*token, domain, needed),
-            None => false,
+            Some(Some(token)) => self.wall.authorizes(*token, domain, needed),
+            _ => false,
         }
     }
 
+    /// Operator withdrawal of a **live** domain's authority. Leaves a tombstone so
+    /// the withdrawal *sticks*: a later gate call for the same live domain is
+    /// denied, not silently re-granted.
     fn revoke(&mut self, domain: DomainId) {
-        if let Some(token) = self.domains.remove(&domain) {
+        match self.domains.get_mut(&domain) {
+            Some(slot) => {
+                if let Some(token) = slot.take() {
+                    self.wall.revoke(token);
+                }
+            }
+            None => {
+                self.domains.insert(domain, None);
+            }
+        }
+    }
+
+    /// Forget a **dead** domain entirely (its pid is gone), so a process that later
+    /// reuses the pid starts from first contact rather than inheriting authority or
+    /// a tombstone.
+    fn forget(&mut self, domain: DomainId) {
+        if let Some(Some(token)) = self.domains.remove(&domain) {
             self.wall.revoke(token);
         }
     }
 
-    /// The scheme-creation gate policy. A domain unknown to the wall is registered
-    /// per the legacy policy (only `uid == 0` is granted); a known domain is
-    /// authoritative, so a prior revoke is honoured even for `uid == 0`.
+    /// The scheme-creation gate. The legacy policy — only `uid == 0` may create a
+    /// scheme — is re-checked on **every** call, so a pid reused by a non-root
+    /// process cannot inherit a prior grant. First contact at uid 0 registers the
+    /// capability; a tombstoned (revoked) domain stays denied even at uid 0.
     fn authorize_scheme_create(&mut self, domain: DomainId, uid: u32) -> bool {
-        if !self.domains.contains_key(&domain) && uid == 0 {
-            self.grant(domain, Authority::CREATE_SCHEME);
+        if uid != 0 {
+            return false;
+        }
+        match self.domains.get(&domain) {
+            None => self.grant(domain, Authority::CREATE_SCHEME), // first contact
+            Some(None) => return false,                           // tombstoned: stays revoked
+            Some(Some(_)) => {}                                   // already granted
         }
         self.authorizes(domain, Authority::CREATE_SCHEME)
     }
@@ -108,9 +137,9 @@ pub fn init() {
 }
 
 /// Authorize scheme creation for the calling context (named structurally by
-/// `pid`). Behaviour-preserving for the legacy `uid == 0` policy, but mediated
-/// through the revocable capability wall. Before the wall is initialized the
-/// legacy policy applies directly.
+/// `pid`). The legacy `uid == 0` policy is preserved and re-checked every call,
+/// but mediated through the revocable capability wall. Before the wall is
+/// initialized the legacy policy applies directly.
 #[must_use]
 pub fn authorize_scheme_create(pid: usize, uid: u32) -> bool {
     let domain = DomainId(pid as u64);
@@ -120,10 +149,19 @@ pub fn authorize_scheme_create(pid: usize, uid: u32) -> bool {
     }
 }
 
-/// Destroy the capability of a dying context's domain so its authority cannot be
-/// inherited by a later reuse of the same pid. Called from the context exit path.
-pub fn on_context_exit(pid: usize) {
+/// Withdraw a live domain's authority and tombstone it so the withdrawal sticks.
+/// The control-plane executor for a quarantine decision.
+#[allow(dead_code)] // operator/quarantine entry point (wired incrementally)
+pub fn revoke_domain(pid: usize) {
     if let Some(state) = STATE.get() {
         state.lock().revoke(DomainId(pid as u64));
+    }
+}
+
+/// Forget a dying context's domain so its authority cannot be inherited by a later
+/// reuse of the same pid. Called from the context exit path.
+pub fn on_context_exit(pid: usize) {
+    if let Some(state) = STATE.get() {
+        state.lock().forget(DomainId(pid as u64));
     }
 }

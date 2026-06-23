@@ -99,10 +99,17 @@ struct CapRecord {
 }
 
 /// The opaque token a domain holds as proof of authority. Possession *is* the
-/// proof. It is a generation-checked [`Handle`] newtyped so it cannot be confused
-/// with any other handle namespace. Cheap to copy and store.
+/// proof. Cheap to copy and store.
+///
+/// It pairs a generation-checked [`Handle`] with the wall's monotonic issue
+/// `epoch`. Both are compared on every check, so a slot reuse — even an
+/// astronomically unlikely `u32` generation *wrap* — can never make a stale token
+/// alias a new occupant: the `u64` epoch never repeats.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
-pub struct CapToken(Handle);
+pub struct CapToken {
+    handle: Handle,
+    epoch: u64,
+}
 
 /// The wall is at capacity; no further capability can be issued until one is
 /// revoked.
@@ -162,7 +169,7 @@ impl<const N: usize> AuthorityWall<N> {
             authority,
             epoch,
         }) {
-            Ok(handle) => Ok(CapToken(handle)),
+            Ok(handle) => Ok(CapToken { handle, epoch }),
             Err(_) => Err(AtCapacity),
         }
     }
@@ -172,8 +179,12 @@ impl<const N: usize> AuthorityWall<N> {
     /// a different domain, a revoked (stale) token, or insufficient authority. The
     /// record's rights are read, never mutated.
     pub fn authorizes(&self, token: CapToken, domain: DomainId, needed: Authority) -> bool {
-        match self.caps.get(token.0) {
-            Some(record) => record.domain == domain && record.authority.contains(needed),
+        match self.caps.get(token.handle) {
+            Some(record) => {
+                record.epoch == token.epoch
+                    && record.domain == domain
+                    && record.authority.contains(needed)
+            }
             None => false,
         }
     }
@@ -182,7 +193,8 @@ impl<const N: usize> AuthorityWall<N> {
     /// `None` if the token is forged or revoked.
     pub fn inspect(&self, token: CapToken) -> Option<(DomainId, Authority, u64)> {
         self.caps
-            .get(token.0)
+            .get(token.handle)
+            .filter(|record| record.epoch == token.epoch)
             .map(|record| (record.domain, record.authority, record.epoch))
     }
 
@@ -192,7 +204,17 @@ impl<const N: usize> AuthorityWall<N> {
     /// `false` if the token was already stale/forged. There is no rights
     /// downgrade: to reduce a domain's authority, revoke and re-issue.
     pub fn revoke(&mut self, token: CapToken) -> bool {
-        self.caps.remove(token.0).is_some()
+        // Match handle AND epoch before destroying, so a stale token can never
+        // revoke a reused slot's new occupant.
+        if self
+            .caps
+            .get(token.handle)
+            .is_some_and(|r| r.epoch == token.epoch)
+        {
+            self.caps.remove(token.handle).is_some()
+        } else {
+            false
+        }
     }
 
     /// Delegate a **subset** of authority to another domain — the edge that turns
@@ -213,9 +235,9 @@ impl<const N: usize> AuthorityWall<N> {
     ) -> Result<CapToken, DelegateError> {
         // Copy the delegator's authority out so the immutable borrow ends before
         // the mutable mint below.
-        let held = match self.caps.get(delegator.0) {
-            Some(record) => record.authority,
-            None => return Err(DelegateError::Unauthorized),
+        let held = match self.caps.get(delegator.handle) {
+            Some(record) if record.epoch == delegator.epoch => record.authority,
+            _ => return Err(DelegateError::Unauthorized),
         };
         if !held.contains(Authority::DELEGATE) || !held.contains(subset) {
             return Err(DelegateError::Unauthorized);
@@ -560,5 +582,73 @@ mod tests {
         std::eprintln!(
             "bounded-exhaustive: {explored} reachable states verified to depth {DEPTH}, no invariant violated"
         );
+    }
+
+    // Regression for the two orchestrator-policy bugs an adversarial audit found
+    // in `kernel::security::SecurityState`: a revoke that did not stick, and a
+    // `uid` that was not re-checked for a known domain (pid-reuse escalation).
+    // This mirrors the *fixed* policy over the REAL `AuthorityWall`; keep it in
+    // sync with `src/security/mod.rs`.
+    #[test]
+    fn orchestrator_gate_is_sound_under_revoke_and_uid_recheck() {
+        use std::collections::BTreeMap;
+        type Map = BTreeMap<DomainId, Option<CapToken>>;
+
+        fn grant(w: &mut AuthorityWall<8>, m: &mut Map, d: DomainId, a: Authority) {
+            if let Some(Some(old)) = m.insert(d, None) {
+                w.revoke(old);
+            }
+            if let Ok(t) = w.issue(d, a) {
+                m.insert(d, Some(t));
+            }
+        }
+        fn authorizes(w: &AuthorityWall<8>, m: &Map, d: DomainId, need: Authority) -> bool {
+            matches!(m.get(&d), Some(Some(t)) if w.authorizes(*t, d, need))
+        }
+        fn revoke(w: &mut AuthorityWall<8>, m: &mut Map, d: DomainId) {
+            match m.get_mut(&d) {
+                Some(slot) => {
+                    if let Some(t) = slot.take() {
+                        w.revoke(t);
+                    }
+                }
+                None => {
+                    m.insert(d, None);
+                }
+            }
+        }
+        fn forget(w: &mut AuthorityWall<8>, m: &mut Map, d: DomainId) {
+            if let Some(Some(t)) = m.remove(&d) {
+                w.revoke(t);
+            }
+        }
+        fn gate(w: &mut AuthorityWall<8>, m: &mut Map, d: DomainId, uid: u32) -> bool {
+            if uid != 0 {
+                return false;
+            }
+            match m.get(&d) {
+                None => grant(w, m, d, Authority::CREATE_SCHEME),
+                Some(None) => return false,
+                Some(Some(_)) => {}
+            }
+            authorizes(w, m, d, Authority::CREATE_SCHEME)
+        }
+
+        let mut w: AuthorityWall<8> = AuthorityWall::new();
+        let mut m: Map = BTreeMap::new();
+        let p = DomainId(7);
+
+        // First contact at uid 0 -> granted (behaviour preserved).
+        assert!(gate(&mut w, &mut m, p, 0));
+        // BUG B fixed: the SAME known domain at uid != 0 is denied (uid re-checked).
+        assert!(!gate(&mut w, &mut m, p, 1000));
+        // BUG A fixed: an operator revoke STICKS — uid 0 is still denied afterward.
+        revoke(&mut w, &mut m, p);
+        assert!(!gate(&mut w, &mut m, p, 0));
+        // A dead pid is forgotten -> a reuse at uid 0 starts fresh (granted again).
+        forget(&mut w, &mut m, p);
+        assert!(gate(&mut w, &mut m, p, 0));
+        // A never-seen domain at uid != 0 is denied.
+        assert!(!gate(&mut w, &mut m, DomainId(9), 1000));
     }
 }
