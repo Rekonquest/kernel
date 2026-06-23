@@ -82,6 +82,9 @@ mod profiling;
 /// Schemes, filesystem handlers
 mod scheme;
 
+/// Capability-based security wall (orchestrator over `driver_primitives`)
+mod security;
+
 /// Early init
 mod startup;
 
