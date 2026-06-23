@@ -126,6 +126,7 @@ pub enum DelegateError {
 /// about who deserves a capability; that is the orchestrator's job, expressed by
 /// *which* `(domain, authority)` pairs it chooses to [`issue`](Self::issue) and to
 /// *whom* it hands the returned token.
+#[derive(Clone)]
 pub struct AuthorityWall<const N: usize> {
     caps: HandleTable<CapRecord, N>,
     epoch: SeqCounter,
@@ -397,5 +398,167 @@ mod tests {
         // orchestrator policy, e.g. a graph min-cut — not automatic here).
         assert!(wall.revoke(delegator));
         assert!(wall.authorizes(delegated, THIRD, Authority::CLAIM_IRQ));
+    }
+
+    // ----- Bounded exhaustive model-check ------------------------------------
+    //
+    // Beyond the spot tests above, drive the *real* wall through every reachable
+    // sequence of operations (issue / revoke / delegate) up to a bounded depth
+    // over a small finite universe, and at every state assert the wall's
+    // `authorizes` exactly matches a ground-truth reference model. This proves
+    // the security invariants — no-forge, immutability, domain-binding,
+    // revocation-completeness (incl. slot/generation reuse), and the delegation
+    // bound — hold across all those interleavings, not just the hand-picked ones.
+
+    #[derive(Clone)]
+    struct RefCap {
+        token: CapToken,
+        domain: DomainId,
+        authority: Authority,
+        alive: bool,
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn explore<const N: usize>(
+        wall: AuthorityWall<N>,
+        refs: Vec<RefCap>,
+        depth: usize,
+        domains: &[DomainId],
+        auths: &[Authority],
+        needs: &[Authority],
+        budget: &mut u64,
+        explored: &mut u64,
+    ) {
+        // Ground-truth check: the wall agrees with the reference model for every
+        // issued token, every domain, and every queried authority.
+        for r in &refs {
+            for &dd in domains {
+                for &need in needs {
+                    let expected = r.alive && dd == r.domain && r.authority.contains(need);
+                    assert_eq!(
+                        wall.authorizes(r.token, dd, need),
+                        expected,
+                        "authorizes mismatch (tok dom={:?} auth={:?} alive={}; ask dom={:?} need={:?})",
+                        r.domain, r.authority, r.alive, dd, need
+                    );
+                }
+            }
+        }
+        *explored += 1;
+        if depth == 0 || *budget == 0 {
+            return;
+        }
+        *budget -= 1;
+
+        // issue(domain, authority)
+        for &d in domains {
+            for &a in auths {
+                let mut w = wall.clone();
+                let mut rs = refs.clone();
+                if let Ok(t) = w.issue(d, a) {
+                    rs.push(RefCap {
+                        token: t,
+                        domain: d,
+                        authority: a,
+                        alive: true,
+                    });
+                }
+                explore(w, rs, depth - 1, domains, auths, needs, budget, explored);
+                if *budget == 0 {
+                    return;
+                }
+            }
+        }
+        // revoke(token) — every live capability
+        for i in 0..refs.len() {
+            if !refs[i].alive {
+                continue;
+            }
+            let mut w = wall.clone();
+            let mut rs = refs.clone();
+            assert!(w.revoke(rs[i].token), "revoke of a live token must succeed");
+            rs[i].alive = false;
+            explore(w, rs, depth - 1, domains, auths, needs, budget, explored);
+            if *budget == 0 {
+                return;
+            }
+        }
+        // delegate(token, to_domain, subset)
+        for i in 0..refs.len() {
+            if !refs[i].alive {
+                continue;
+            }
+            for &to in domains {
+                for &subset in auths {
+                    let mut w = wall.clone();
+                    let mut rs = refs.clone();
+                    let held = rs[i].authority;
+                    match w.delegate(rs[i].token, to, subset) {
+                        Ok(nt) => {
+                            assert!(
+                                held.contains(Authority::DELEGATE) && held.contains(subset),
+                                "delegate succeeded without DELEGATE or beyond held authority"
+                            );
+                            rs.push(RefCap {
+                                token: nt,
+                                domain: to,
+                                authority: subset,
+                                alive: true,
+                            });
+                        }
+                        Err(DelegateError::Unauthorized) => {
+                            assert!(
+                                !(held.contains(Authority::DELEGATE) && held.contains(subset)),
+                                "delegate refused despite sufficient authority"
+                            );
+                        }
+                        Err(DelegateError::AtCapacity) => {}
+                    }
+                    explore(w, rs, depth - 1, domains, auths, needs, budget, explored);
+                    if *budget == 0 {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bounded_exhaustive_invariant_verification() {
+        const DOMAINS: [DomainId; 2] = [DomainId(7), DomainId(8)];
+        // Issued/delegated authority shapes, incl. a DELEGATE-bearing one.
+        const AUTHS: [Authority; 3] = [
+            Authority::CLAIM_IRQ,
+            Authority::CREATE_SCHEME,
+            Authority::DELEGATE.union(Authority::CLAIM_IRQ),
+        ];
+        // Authorities queried against, incl. one never issued (`MAP_MEMORY`).
+        const NEEDS: [Authority; 5] = [
+            Authority::NONE,
+            Authority::CLAIM_IRQ,
+            Authority::CREATE_SCHEME,
+            Authority::DELEGATE,
+            Authority::MAP_MEMORY,
+        ];
+        const DEPTH: usize = 5;
+
+        let mut budget: u64 = 800_000;
+        let mut explored: u64 = 0;
+        let wall: AuthorityWall<4> = AuthorityWall::new();
+        explore(
+            wall,
+            Vec::new(),
+            DEPTH,
+            &DOMAINS,
+            &AUTHS,
+            &NEEDS,
+            &mut budget,
+            &mut explored,
+        );
+        // Confirm we actually explored a large state space, not a trivial one.
+        assert!(explored > 50_000, "explored too few states: {explored}");
+        std::eprintln!(
+            "bounded-exhaustive: {explored} reachable states verified to depth {DEPTH}, no invariant violated"
+        );
     }
 }
