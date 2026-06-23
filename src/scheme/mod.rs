@@ -320,9 +320,13 @@ impl KernelScheme for SchemeList {
             return Err(Error::new(EINVAL));
         }
 
-        if caller.uid != 0 {
+        // Scheme creation is authorized through the capability wall: a uid-0
+        // caller is granted CREATE_SCHEME on first use (the legacy policy), but
+        // the authority is now recorded and revocable — a revoked domain is
+        // refused even at uid 0. Identity is structural (the caller's pid).
+        if !crate::security::authorize_scheme_create(caller.pid, caller.uid) {
             return Err(Error::new(EACCES));
-        };
+        }
 
         let context = Arc::downgrade(&context::current());
 
