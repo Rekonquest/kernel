@@ -1,6 +1,16 @@
 # The Capability Security Wall
 
-Status: **foundation landed and CI-green; enforcement pending boot verification.**
+Status: **ENFORCING and BOOT-VERIFIED.** Scheme creation is authorized through the
+capability wall (`scheme/mod.rs` → `security::authorize_scheme_create`); the kernel
+boots to `redox login:` in QEMU with the full daemon chain up (pcid → virtio-gpud →
+display), no panic — every boot-time scheme creation authorized through the wall.
+Behaviour is preserved for `uid == 0`, but the authority is now a **revocable
+capability** (a revoked domain is refused even at uid 0). Remaining work is migrating
+the other `euid`-gated seams (`fchown`, proc ops) the same way, and tightening policy.
+
+> Boot-test note: `WALL_CAPACITY` must stay small — the kit `HandleTable` is a
+> fixed-capacity array built on the kernel stack at boot; an oversized value overflows
+> the stack (double fault in `kmain`). 256 boots cleanly; 4096 did not.
 
 The kernel's security is moving from ambient identity checks (`euid == 0`, scattered)
 to **held, immutable, revocable capabilities** — composed from the `driver-primitives`
