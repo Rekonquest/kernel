@@ -35,8 +35,9 @@ use crate::fence::SeqCounter;
 use crate::handle::{Handle, HandleTable};
 
 /// A security domain identity (a process, driver daemon, or service). Opaque and
-/// immutable; the wall never interprets it beyond equality.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+/// immutable; the wall never interprets it beyond equality. Ordered so an
+/// orchestrator can index domains in a map.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct DomainId(pub u64);
 
 /// The set of authorities a capability conveys. An immutable bitset, fixed at
