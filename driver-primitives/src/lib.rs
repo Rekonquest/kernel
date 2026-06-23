@@ -73,7 +73,7 @@ pub mod runtime;
 pub mod txn;
 pub mod virtio;
 
-pub use authority::{AtCapacity, Authority, AuthorityWall, CapToken, DomainId};
+pub use authority::{AtCapacity, Authority, AuthorityWall, CapToken, DelegateError, DomainId};
 pub use capability::{CapabilityRing, Grant};
 pub use display::{Display, Mode};
 pub use dma::{Descriptor, DmaRegion};

@@ -109,6 +109,17 @@ pub struct CapToken(Handle);
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct AtCapacity;
 
+/// Why a [`delegate`](AuthorityWall::delegate) was refused.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DelegateError {
+    /// The delegator's token is forged/revoked, lacks [`Authority::DELEGATE`], or
+    /// the requested subset exceeds the authority the delegator holds. You cannot
+    /// delegate authority you do not have, nor without the delegation right.
+    Unauthorized,
+    /// The wall is at capacity.
+    AtCapacity,
+}
+
 /// A capability-authority wall holding up to `N` live capabilities.
 ///
 /// Dumb mechanism only — it issues, checks, and revokes. It holds **no policy**
@@ -181,6 +192,35 @@ impl<const N: usize> AuthorityWall<N> {
     /// downgrade: to reduce a domain's authority, revoke and re-issue.
     pub fn revoke(&mut self, token: CapToken) -> bool {
         self.caps.remove(token.0).is_some()
+    }
+
+    /// Delegate a **subset** of authority to another domain — the edge that turns
+    /// flat grants into a delegation graph.
+    ///
+    /// The `delegator` must hold a live capability conveying both
+    /// [`Authority::DELEGATE`] *and* every authority in `subset`: you cannot
+    /// delegate more than you hold, nor without the delegation right. On success a
+    /// fresh, **independent** capability is minted for `to_domain` (revoking it
+    /// does not touch the delegator's, and vice-versa — cascade is a policy the
+    /// orchestrator layers on top, e.g. a graph min-cut). Identity stays derived:
+    /// the delegatee proves its authority by holding the returned token.
+    pub fn delegate(
+        &mut self,
+        delegator: CapToken,
+        to_domain: DomainId,
+        subset: Authority,
+    ) -> Result<CapToken, DelegateError> {
+        // Copy the delegator's authority out so the immutable borrow ends before
+        // the mutable mint below.
+        let held = match self.caps.get(delegator.0) {
+            Some(record) => record.authority,
+            None => return Err(DelegateError::Unauthorized),
+        };
+        if !held.contains(Authority::DELEGATE) || !held.contains(subset) {
+            return Err(DelegateError::Unauthorized);
+        }
+        self.issue(to_domain, subset)
+            .map_err(|_| DelegateError::AtCapacity)
     }
 
     /// Number of live capabilities.
@@ -310,5 +350,52 @@ mod tests {
         assert!(Authority::NONE.is_empty());
         // Unknown bits are dropped, so a holder cannot smuggle undefined authority.
         assert_eq!(Authority::from_bits_truncate(0xFFFF_FFFF), Authority::ALL);
+    }
+
+    #[test]
+    fn delegation_needs_the_right_and_cannot_exceed_what_is_held() {
+        const THIRD: DomainId = DomainId(3);
+        let mut wall: AuthorityWall<8> = AuthorityWall::new();
+
+        // A domain with CLAIM_IRQ but NOT delegate cannot hand it on.
+        let no_delegate = wall.issue(DRIVER, Authority::CLAIM_IRQ).unwrap();
+        assert_eq!(
+            wall.delegate(no_delegate, THIRD, Authority::CLAIM_IRQ),
+            Err(DelegateError::Unauthorized)
+        );
+
+        // A delegator with DELEGATE + CLAIM_IRQ may delegate CLAIM_IRQ...
+        let delegator = wall
+            .issue(DRIVER, Authority::DELEGATE.union(Authority::CLAIM_IRQ))
+            .unwrap();
+        assert!(wall
+            .delegate(delegator, THIRD, Authority::CLAIM_IRQ)
+            .is_ok());
+
+        // ...but NOT an authority it does not itself hold.
+        assert_eq!(
+            wall.delegate(delegator, THIRD, Authority::CREATE_SCHEME),
+            Err(DelegateError::Unauthorized)
+        );
+    }
+
+    #[test]
+    fn delegated_capability_is_independent_of_the_delegator() {
+        const THIRD: DomainId = DomainId(3);
+        let mut wall: AuthorityWall<8> = AuthorityWall::new();
+        let delegator = wall.issue(ROOT, Authority::ALL).unwrap();
+
+        let delegated = wall
+            .delegate(delegator, THIRD, Authority::CLAIM_IRQ)
+            .unwrap();
+        // The delegatee holds exactly the delegated subset, bound to its own domain.
+        assert!(wall.authorizes(delegated, THIRD, Authority::CLAIM_IRQ));
+        assert!(!wall.authorizes(delegated, THIRD, Authority::CREATE_SCHEME));
+        assert!(!wall.authorizes(delegated, ROOT, Authority::CLAIM_IRQ));
+
+        // Revoking the delegator does NOT revoke the delegatee (cascade is an
+        // orchestrator policy, e.g. a graph min-cut — not automatic here).
+        assert!(wall.revoke(delegator));
+        assert!(wall.authorizes(delegated, THIRD, Authority::CLAIM_IRQ));
     }
 }
