@@ -27,12 +27,14 @@ impl Handle {
     }
 }
 
+#[derive(Clone)]
 struct Slot<T> {
     generation: u32,
     value: Option<T>,
 }
 
 /// A fixed-capacity table mapping opaque [`Handle`]s to values of type `T`.
+#[derive(Clone)]
 pub struct HandleTable<T, const N: usize> {
     slots: [Slot<T>; N],
     /// Stack of free slot indices.

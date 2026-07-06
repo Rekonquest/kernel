@@ -56,6 +56,7 @@
 //! no locks — synchronization and the OS-facing glue (MMIO/DMA mapping, IRQ
 //! delivery) belong to the orchestrator that wraps them.
 
+pub mod authority;
 pub mod capability;
 pub mod display;
 pub mod dma;
@@ -64,6 +65,7 @@ pub mod fairqueue;
 pub mod feature;
 pub mod fence;
 pub mod handle;
+pub mod mincut;
 pub mod mmio;
 pub mod power;
 pub mod reactor;
@@ -72,6 +74,7 @@ pub mod runtime;
 pub mod txn;
 pub mod virtio;
 
+pub use authority::{AtCapacity, Authority, AuthorityWall, CapToken, DelegateError, DomainId};
 pub use capability::{CapabilityRing, Grant};
 pub use display::{Display, Mode};
 pub use dma::{Descriptor, DmaRegion};
@@ -80,6 +83,7 @@ pub use fairqueue::FairQueue;
 pub use feature::Features;
 pub use fence::{Fence, SeqCounter};
 pub use handle::{Handle, HandleTable};
+pub use mincut::MinCutGraph;
 pub use mmio::{Bank, Reg};
 pub use power::{Governor, PowerBudget, PowerManager, SensorEvent, Sensors};
 pub use reactor::{Completion, Reactor, SubmissionId, Ticket};

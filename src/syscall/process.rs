@@ -50,12 +50,15 @@ pub fn exit_this_context(excp: Option<syscall::Exception>, token: &mut CleanLock
         }
     }
     // TODO: Should status == Status::HardBlocked be handled differently?
-    let owner = {
+    let (owner, dead_pid) = {
         let mut guard = context_lock.write(token.token());
         guard.status = context::Status::Dead { excp };
 
-        guard.owner_proc_id
+        (guard.owner_proc_id, guard.pid)
     };
+    // Destroy the dying domain's scheme-creation capability so a reused pid does
+    // not inherit it.
+    crate::security::on_context_exit(dead_pid);
     if let Some(owner) = owner {
         event::trigger(
             GlobalSchemes::Proc.scheme_id(),

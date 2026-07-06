@@ -163,6 +163,10 @@ pub(crate) fn kmain(bootstrap: Bootstrap) -> ! {
     //Initialize global schemes, such as `acpi:`.
     scheme::init_globals();
 
+    // Initialize the capability security wall and mint the root domain's
+    // full-authority capability (held by the bootstrap context).
+    crate::security::init();
+
     debug!("BSP: {} CPUs", crate::cpu_count());
     debug!("Env: {:?}", ::core::str::from_utf8(bootstrap.env));
 

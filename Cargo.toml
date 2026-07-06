@@ -1,5 +1,8 @@
 [workspace]
 resolver = "3"
+# These crates are their own isolated workspaces (own toolchain/CI); the kernel
+# depends on driver-primitives by path but must not absorb it as a member.
+exclude = ["driver-primitives", "redox-virtio-drivers"]
 
 [package]
 name = "kernel"
@@ -22,6 +25,7 @@ redox-path = "0.2.0"
 #redox_syscall = { version = "0.8.1", default-features = false }
 redox_syscall = { git = "https://gitlab.redox-os.org/redox-os/syscall.git", default-features = false }
 rmm = { path = "rmm", default-features = false }
+driver-primitives = { path = "driver-primitives" }
 slab = { version = "0.4", default-features = false }
 smallvec = { version = "1.15.1", default-features = false }
 spin = { version = "0.9.8" }
