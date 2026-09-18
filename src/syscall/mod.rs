@@ -95,6 +95,20 @@ pub fn syscall(
             SYS_FMAP => {
                 let addrspace = AddrSpace::current()?;
                 let map = unsafe { UserSlice::ro(c, d)?.read_exact::<Map>()? };
+                // Taint wall (E32 wall 4): PROT_EXEC on a tainted fd is
+                // REFUSED. This is the strongest enforcement point —
+                // no tainted content may become executable memory,
+                // which is the mechanism zero-click exploits need to
+                // run their payload. Anonymous mappings (b == !0) are
+                // memory the process already owns; the gate is on
+                // mapping FILE content executable.
+                if b != !0 && map.flags.contains(MapFlags::PROT_EXEC) {
+                    let current = crate::context::current();
+                    let pid = current.read(token.token()).pid as u64;
+                    if !crate::security::taint::gate_exec(pid, b as u64) {
+                        return Err(Error::new(::syscall::EACCES));
+                    }
+                }
                 if b == !0 {
                     MemoryScheme::fmap_anonymous(&addrspace, &map, false, token)
                 } else {

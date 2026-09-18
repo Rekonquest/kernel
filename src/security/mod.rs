@@ -29,6 +29,8 @@
 //! `uid == 0` check could never do. [`on_context_exit`] destroys a dying domain's
 //! capability so a reused pid starts from a clean slate.
 
+pub mod taint;
+
 use alloc::collections::BTreeMap;
 
 use driver_primitives::{Authority, AuthorityWall, CapToken, DomainId};
@@ -135,6 +137,7 @@ pub fn init() {
     let state = STATE.call_once(|| Mutex::new(SecurityState::new()));
     state.lock().grant(ROOT_DOMAIN, Authority::ALL);
     sense_init();
+    taint::init();
 }
 
 /// Authorize scheme creation for the calling context (named structurally by
@@ -166,6 +169,7 @@ pub fn on_context_exit(pid: usize) {
         state.lock().forget(DomainId(pid as u64));
     }
     sense_forget(pid);
+    taint::on_context_exit(pid as u64);
 }
 
 // ----- behavior wall (the sense field): what domains DO ------------------

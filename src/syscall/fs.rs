@@ -93,6 +93,30 @@ pub fn openat(
     // already read here — zero extra locking). Class 1 = open.
     crate::security::sense_record(caller_ctx.pid, 1, number as u64);
 
+    // Taint wall (E32 wall 4): network-sourced opens mark their
+    // descriptions tainted — derived content stays data. The fd this
+    // open returns will carry the mark at the execution gate.
+    // (Network schemes are identified by path prefix: the kernel
+    // marks; the gate at fmap/exec enforces.)
+    {
+        use crate::security::taint;
+        // The open PATH identifies the scheme: network-sourced opens
+        // mark the returned fd tainted at the description level.
+        // path_buf is the parsed String (copy_path_to_buf above).
+        let is_network = path_buf.starts_with("tcp:")
+            || path_buf.starts_with("udp:")
+            || path_buf.starts_with("ip:")
+            || path_buf.starts_with("icmp:");
+        if is_network {
+            // Context-level mark: the execution gate (fmap PROT_EXEC
+            // and the exec path) checks this pid. fd-level marking
+            // lands when the network scheme delivers (its recv path
+            // holds the fd); this seam catches the OPEN of a network
+            // resource, which is the earliest untrusted-ingress point.
+            taint::mark_tainted(caller_ctx.pid as u64, u64::MAX);
+        }
+    }
+
     let new_description = {
         let scheme = scheme::get_scheme(token.token(), scheme_id)?;
 
