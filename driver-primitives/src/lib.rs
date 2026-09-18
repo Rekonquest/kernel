@@ -71,6 +71,7 @@ pub mod power;
 pub mod reactor;
 pub mod ring;
 pub mod runtime;
+pub mod sense;
 pub mod txn;
 pub mod virtio;
 

@@ -89,6 +89,10 @@ pub fn openat(
         .caller_ctx()
         .filter_uid_gid(euid, egid);
 
+    // Behavior wall: the open seam feeds the sense field (the pid is
+    // already read here — zero extra locking). Class 1 = open.
+    crate::security::sense_record(caller_ctx.pid, 1, number as u64);
+
     let new_description = {
         let scheme = scheme::get_scheme(token.token(), scheme_id)?;
 

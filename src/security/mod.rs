@@ -134,6 +134,7 @@ static STATE: Once<Mutex<SecurityState>> = Once::new();
 pub fn init() {
     let state = STATE.call_once(|| Mutex::new(SecurityState::new()));
     state.lock().grant(ROOT_DOMAIN, Authority::ALL);
+    sense_init();
 }
 
 /// Authorize scheme creation for the calling context (named structurally by
@@ -164,4 +165,63 @@ pub fn on_context_exit(pid: usize) {
     if let Some(state) = STATE.get() {
         state.lock().forget(DomainId(pid as u64));
     }
+    sense_forget(pid);
+}
+
+// ----- behavior wall (the sense field): what domains DO ------------------
+//
+// The AuthorityWall above gates CONSTRUCTION (who may create schemes).
+// The sense field gates BEHAVIOR (what a running domain is doing): a
+// vibration `(pid, class, target)` is recorded at the fs seams where
+// a CallerCtx is already built (zero extra locking), the field learns
+// the normal conversation map during boot, and post-freeze a domain
+// whose behavior leaves the map accumulates foreign budget until
+// quarantined — at which point its construction authority is revoked
+// through the SAME tombstone path as an operator withdrawal: the two
+// walls meet. Revocation is one-way from behavior to construction;
+// the wall never grants, only withdraws.
+
+static SENSE: Once<Mutex<driver_primitives::sense::SenseField>> = Once::new();
+
+fn sense() -> Option<&'static Mutex<driver_primitives::sense::SenseField>> {
+    SENSE.get()
+}
+
+/// Initialize the behavior wall (called from `init`, alongside the AuthorityWall).
+fn sense_init() {
+    SENSE.call_once(|| Mutex::new(driver_primitives::sense::SenseField::new()));
+}
+
+/// Record one vibration at a seam where the caller's pid is already known.
+/// `class` distinguishes syscall shapes (e.g. 1 = open, 2 = dup/scheme).
+#[allow(dead_code)] // wired incrementally; the scheme gate is first
+pub fn sense_record(pid: usize, class: u64, target: u64) {
+    if let Some(field) = sense() {
+        let mut field = field.lock();
+        field.record(pid as u64, class, target, 1.0);
+        // Behavior -> construction coupling: a quarantine verdict is
+        // executed as a capability revocation (and tombstone), so a
+        // condemned domain cannot construct anything new even at
+        // uid 0 — the same withdrawal an operator would perform.
+        while let Some(condemned) = field.take_intrusion() {
+            if let Some(state) = STATE.get() {
+                state.lock().revoke(DomainId(condemned as usize as u64));
+            }
+        }
+    }
+}
+
+/// Forget a dying context's tracking so a pid reuse starts clean.
+pub fn sense_forget(pid: usize) {
+    if let Some(field) = sense() {
+        field.lock().forget(pid as u64);
+    }
+}
+
+/// Whether a domain's BEHAVIOR is currently condemned (sustained
+/// foreign activity). Read-only; the revocation coupling happens in
+/// [`sense_record`].
+#[allow(dead_code)]
+pub fn sense_quarantined(pid: usize) -> bool {
+    sense().is_some_and(|field| field.lock().quarantined(pid as u64))
 }
